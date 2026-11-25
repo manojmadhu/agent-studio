@@ -1,0 +1,61 @@
+#root{height:100%}
+/* React Flow integration: make @xyflow/react render the prototype's own canvas look (not the library defaults). */
+.cv .react-flow{background:transparent;--xy-edge-stroke:transparent}
+.cv .react-flow__pane{cursor:grab}
+.cv .react-flow__pane.dragging{cursor:grabbing}
+.cv .react-flow__node{cursor:pointer;border:0;padding:0;background:none;box-shadow:none;border-radius:0}
+.cv .react-flow__node:focus-visible{outline:none;box-shadow:none}
+.cv .react-flow__node:focus-visible>.nd{box-shadow:var(--ring),var(--sh-md)}
+.cv .react-flow__node>.nd{position:relative;left:auto;top:auto}
+.cv .react-flow__node.selected>.nd,.cv .react-flow__node:hover{z-index:1}
+.cv .react-flow__edges,.cv .react-flow__edge{overflow:visible}
+.cv .react-flow__edge{pointer-events:none}
+.cv .react-flow__edge .w-hit{pointer-events:stroke}
+.cv .react-flow__edge.selected .w,.cv .react-flow__edge:focus .w{stroke:var(--brand)}
+.cv .react-flow__connectionline{z-index:5}
+.cv .react-flow__connection-path{fill:none;stroke:var(--brand);stroke-width:2;stroke-dasharray:5 5}
+.cv .react-flow__attribution{display:none}
+/* handles = prototype ports */
+.cv .react-flow__handle.port{min-width:0;min-height:0;transform:none;background:var(--surface);pointer-events:all}
+.cv .react-flow__handle.port.in{left:-8px;top:50%;right:auto;cursor:crosshair}
+.cv .react-flow__handle.port.out{right:-8px;left:auto}
+.cv .react-flow__handle.port.plug{left:50%;top:-7px;margin:0 0 0 -7px;transform:rotate(45deg)}
+.cv .react-flow__handle.port.out:hover,.cv .react-flow__handle.port.plug:hover,.cv .react-flow__handle.port.in:hover,.cv .react-flow__handle.port.connectingto.valid{background:var(--brand);border-color:var(--brand)}
+.cv .react-flow__handle.slot{min-width:0;min-height:0;top:auto;bottom:-7px;width:13px;height:13px;margin-left:-6.5px;transform:rotate(45deg);background:var(--surface);border:2px solid var(--ai);border-radius:2px;cursor:crosshair;z-index:2;pointer-events:all}
+.cv .react-flow__handle.slot::before{content:"";position:absolute;inset:-10px}
+.cv .react-flow__handle.slot.full{background:var(--ai)}
+.cv .react-flow__handle.slot.need{border-color:var(--danger)}
+.cv .react-flow__handle.slot.connectingto.valid{background:var(--brand);border-color:var(--brand)}
+/* minimap: own component (.mini from the prototype) */
+.cv .react-flow__panel{margin:0}
+/* drag target highlighting while connecting */
+.cv.connecting .react-flow__node>.nd.dim{opacity:.32}
+/* edge label layer (midpoint × buttons) */
+.cv .react-flow__edgelabel-renderer .edel{position:absolute;margin:0;pointer-events:all}
+/* simplified rendering at low zoom keeps big graphs fast */
+.cv.lowzoom .ntb{display:none!important}
+
+/* ── additions for production screens (forms, drawers) — tokens only ── */
+.drawer{position:fixed;top:0;right:0;bottom:0;z-index:40;width:min(560px,100vw);display:flex;flex-direction:column;background:var(--surface);border-left:1px solid var(--border);box-shadow:var(--sh-xl)}
+.drawer .ihead{flex:none}
+.drawer .pbody{flex:1;overflow:auto}
+.drawer .df{display:flex;justify-content:flex-end;gap:10px;padding:14px 16px;border-top:1px solid var(--border);background:var(--surface-2)}
+.scrim.light{background:rgba(15,18,34,.25);place-items:stretch}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}
+@media(max-width:760px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.kv{display:grid;grid-template-columns:140px minmax(0,1fr);gap:8px 12px;margin:0 0 16px;font-size:13.5px}
+.kv dt{color:var(--text-3)}.kv dd{margin:0;overflow-wrap:anywhere}
+.secret-once{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:var(--r);background:var(--warning-soft);color:var(--warning);font-size:13px;margin-bottom:12px}
+.codebox{font:12.5px/19px var(--mono);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto;margin:0}
+.toolrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13.5px}
+.toolrow:last-child{border-bottom:0}
+.section-h{font-size:14px;margin:22px 0 10px;display:flex;align-items:center;gap:8px}
+.card.pad{padding:20px 24px}
+.linklike{color:var(--brand-ink);font-weight:500;text-decoration:underline;text-underline-offset:2px}
+.skip-link{position:absolute;left:-9999px;top:8px;z-index:100;background:var(--surface);padding:8px 12px;border-radius:var(--r)}
+.skip-link:focus{left:8px}
+/* fixes over the prototype (see CHANGELOG): switch rows lay out as flex; slot "*" stays inline */
+.field.row{display:flex}
+.nd .sl .req{display:inline}
+.table td.mono{white-space:nowrap}
+.search{white-space:nowrap;overflow:hidden}

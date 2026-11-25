@@ -1,0 +1,1651 @@
+openapi: 3.1.0
+info:
+  title: Doc Intelligence Platform API
+  version: 1.0.0
+  summary: Control-plane and run-time API for the Doc Intelligence Studio portal and integrations.
+  description: |
+    Backend API consumed by the Doc Intelligence Studio portal (React) and by external systems.
+
+    ## Conventions
+    - Base path `/v1`. JSON (`application/json`) unless stated; errors use `application/problem+json` (RFC 9457).
+    - Every request is scoped to one **workspace**, taken from the access token or API key.
+    - List endpoints use cursor pagination: `?limit=&cursor=` → `{ data: [], next_cursor }`.
+    - Mutating requests accept `Idempotency-Key`. Drafts use `ETag` / `If-Match` for optimistic concurrency.
+    - Timestamps are RFC 3339 UTC. IDs are opaque strings with a type prefix (`pl_`, `run_`, `con_` …).
+    - Rate limits are returned in `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`.
+
+    ## Authentication
+    - **User sessions**: OIDC (Azure AD / Okta / Google) access token, `Authorization: Bearer <jwt>`.
+    - **Machine access**: workspace API key, `X-API-Key: dik_live_…`, restricted by scopes.
+    - **Ingest webhooks**: API key or HMAC-SHA256 signature (`X-DI-Signature`, `X-DI-Timestamp`).
+
+    ## Components and their credentials
+    Every external component — OCR and other document workers, AI model providers, MCP servers, vector stores,
+    mailboxes, messaging, databases, ERP APIs — authenticates through a **Connection**. A connection stores an
+    `auth` scheme (API key, bearer, basic, OAuth 2.0, HMAC, mTLS, AWS SigV4, none) in the secrets vault.
+    Secrets are **write-only**: responses only ever contain a `secret_hint` (last four characters).
+    Components reference connections by `connection_id`.
+  contact:
+    name: Doc Intelligence Platform team
+  license:
+    name: Proprietary
+servers:
+  - url: https://api.docintel.example.com/v1
+    description: Production
+  - url: https://api.sandbox.docintel.example.com/v1
+    description: Sandbox
+  - url: http://localhost:8080/v1
+    description: Local development
+security:
+  - bearerAuth: []
+  - apiKeyAuth: []
+tags:
+  - name: Identity
+  - name: API keys
+  - name: Members
+  - name: Catalog
+  - name: Pipelines
+  - name: Versions
+  - name: Templates
+  - name: Documents
+  - name: Runs
+  - name: Ingest
+  - name: Review
+  - name: Connections
+  - name: Providers
+  - name: Workers
+  - name: MCP servers
+  - name: Knowledge
+  - name: Skills
+  - name: Policies
+  - name: Metrics
+  - name: Audit
+  - name: Webhooks
+  - name: Settings
+
+paths:
+  # ───────────────────────── Identity & access ─────────────────────────
+  /me:
+    get:
+      tags: [Identity]
+      operationId: getMe
+      summary: Current principal (user or API key) and workspace
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Principal' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api-keys:
+    get:
+      tags: [API keys]
+      operationId: listApiKeys
+      parameters: [{ $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/Cursor' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ApiKeyPage' } } } }
+    post:
+      tags: [API keys]
+      operationId: createApiKey
+      description: Creates a workspace API key. The full key is returned **once** in `secret`.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ApiKeyCreate' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/ApiKeyWithSecret' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api-keys/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    delete:
+      tags: [API keys]
+      operationId: revokeApiKey
+      responses: { '204': { description: Revoked }, '404': { $ref: '#/components/responses/NotFound' } }
+  /api-keys/{id}/rotate:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [API keys]
+      operationId: rotateApiKey
+      description: Issues a new secret; the previous one stays valid for `grace_period_hours`.
+      requestBody: { content: { application/json: { schema: { type: object, properties: { grace_period_hours: { type: integer, minimum: 0, maximum: 168, default: 24 } } } } } }
+      responses:
+        '200': { description: Rotated, content: { application/json: { schema: { $ref: '#/components/schemas/ApiKeyWithSecret' } } } }
+  /members:
+    get:
+      tags: [Members]
+      operationId: listMembers
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Member' } } } } } } }
+    post:
+      tags: [Members]
+      operationId: inviteMember
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [email, role], properties: { email: { type: string, format: email }, role: { $ref: '#/components/schemas/Role' } } } } } }
+      responses:
+        '201': { description: Invited, content: { application/json: { schema: { $ref: '#/components/schemas/Member' } } } }
+  /members/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Members]
+      operationId: updateMember
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { role: { $ref: '#/components/schemas/Role' } } } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Member' } } } } }
+    delete:
+      tags: [Members]
+      operationId: removeMember
+      responses: { '204': { description: Removed } }
+
+  # ───────────────────────── Catalog ─────────────────────────
+  /catalog/step-types:
+    get:
+      tags: [Catalog]
+      operationId: listStepTypes
+      description: Every step and AI component type the builder can place, with field definitions so forms render from data.
+      security: [{ bearerAuth: [] }, { apiKeyAuth: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/StepType' } } } } } } }
+  /catalog/services:
+    get:
+      tags: [Catalog]
+      operationId: listServices
+      description: Connectable services (Gmail, WhatsApp, Anthropic, PostgreSQL …) with allowed auth schemes and their fields.
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/ServiceDefinition' } } } } } } }
+
+  # ───────────────────────── Pipelines ─────────────────────────
+  /pipelines:
+    get:
+      tags: [Pipelines]
+      operationId: listPipelines
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/PipelineStatus' } }
+        - { name: q, in: query, description: Search in name and owner, schema: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PipelinePage' } } } }
+    post:
+      tags: [Pipelines]
+      operationId: createPipeline
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PipelineCreate' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Pipeline' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /pipelines/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Pipelines]
+      operationId: getPipeline
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Pipeline' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Pipelines]
+      operationId: updatePipeline
+      description: Update metadata. Graph changes go through the draft.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PipelineUpdate' } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Pipeline' } } } } }
+    delete:
+      tags: [Pipelines]
+      operationId: deletePipeline
+      description: Deletes the pipeline and its versions. Runs are retained for audit.
+      responses: { '204': { description: Deleted }, '409': { $ref: '#/components/responses/Conflict' } }
+  /pipelines/{id}/duplicate:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Pipelines]
+      operationId: duplicatePipeline
+      requestBody: { content: { application/json: { schema: { type: object, properties: { name: { type: string } } } } } }
+      responses: { '201': { description: Created as draft, content: { application/json: { schema: { $ref: '#/components/schemas/Pipeline' } } } } }
+  /pipelines/{id}/activate:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Pipelines]
+      operationId: activatePipeline
+      description: Starts listening to the intake using the live version. Fails with 422 if the live version has blocking issues.
+      responses:
+        '200': { description: Active, content: { application/json: { schema: { $ref: '#/components/schemas/Pipeline' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /pipelines/{id}/pause:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Pipelines]
+      operationId: pausePipeline
+      responses: { '200': { description: Paused, content: { application/json: { schema: { $ref: '#/components/schemas/Pipeline' } } } } }
+  /pipelines/{id}/draft:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Versions]
+      operationId: getDraft
+      responses:
+        '200':
+          description: Current draft graph
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Draft' } } }
+    put:
+      tags: [Versions]
+      operationId: saveDraft
+      description: Autosave of the builder graph. Send the last `ETag` in `If-Match`; 412 means someone else saved first.
+      parameters: [{ name: If-Match, in: header, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DraftSave' } } } }
+      responses:
+        '200':
+          description: Saved
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Draft' } } }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /pipelines/{id}/validate:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Versions]
+      operationId: validatePipeline
+      description: Validates a graph (the draft when no body is sent). Same rules as the portal; the server is authoritative.
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Graph' } } } }
+      responses:
+        '200': { description: Result, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationResult' } } } }
+  /pipelines/{id}/versions:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Versions]
+      operationId: listVersions
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/VersionSummary' } } } } } } }
+    post:
+      tags: [Versions]
+      operationId: publishVersion
+      description: Publishes the draft as version N+1. Active pipelines switch immediately; running documents finish on their version.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [release_note], properties: { release_note: { type: string, maxLength: 500 }, draft_etag: { type: string } } } } } }
+      responses:
+        '201': { description: Published, content: { application/json: { schema: { $ref: '#/components/schemas/Version' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /pipelines/{id}/versions/{version}:
+    parameters: [{ $ref: '#/components/parameters/Id' }, { $ref: '#/components/parameters/VersionNo' }]
+    get:
+      tags: [Versions]
+      operationId: getVersion
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Version' } } } } }
+  /pipelines/{id}/versions/{version}/restore:
+    parameters: [{ $ref: '#/components/parameters/Id' }, { $ref: '#/components/parameters/VersionNo' }]
+    post:
+      tags: [Versions]
+      operationId: restoreVersion
+      description: Replaces the draft with the graph of this version. Publishing is a separate step.
+      responses: { '200': { description: Draft replaced, content: { application/json: { schema: { $ref: '#/components/schemas/Draft' } } } } }
+  /templates:
+    get:
+      tags: [Templates]
+      operationId: listTemplates
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Template' } } } } } } }
+  /templates/{id}/instantiate:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Templates]
+      operationId: instantiateTemplate
+      requestBody: { content: { application/json: { schema: { type: object, properties: { name: { type: string } } } } } }
+      responses: { '201': { description: Draft pipeline created, content: { application/json: { schema: { $ref: '#/components/schemas/Pipeline' } } } } }
+
+  # ───────────────────────── Documents & runs ─────────────────────────
+  /documents:
+    post:
+      tags: [Documents]
+      operationId: uploadDocument
+      description: Upload a file for a test run or ad-hoc processing. Max 50 MB. PDF, PNG, JPEG, TIFF, XLSX, DOCX.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, required: [file], properties: { file: { type: string, format: binary }, purpose: { type: string, enum: [test, ingest] } } }
+      responses:
+        '201': { description: Stored, content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } } }
+        '413': { description: File too large, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /documents/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Documents]
+      operationId: getDocument
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } } } }
+    delete:
+      tags: [Documents]
+      operationId: deleteDocument
+      description: Subject to the retention policy; returns 409 while retention applies.
+      responses: { '204': { description: Deleted }, '409': { $ref: '#/components/responses/Conflict' } }
+  /documents/{id}/pages/{page}/image:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+      - { name: page, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: redacted, in: query, description: Return the redacted rendering, schema: { type: boolean, default: true } }
+    get:
+      tags: [Documents]
+      operationId: getPageImage
+      responses:
+        '200': { description: Page raster, content: { image/png: { schema: { type: string, format: binary } } } }
+  /pipelines/{id}/test-runs:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Runs]
+      operationId: createTestRun
+      description: 'Runs the draft (or a version) against a document. Never calls deliver steps'' external targets unless `deliver: true`.'
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/TestRunCreate' } } } }
+      responses:
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /pipelines/{id}/steps/{node_id}/test:
+    parameters: [{ $ref: '#/components/parameters/Id' }, { name: node_id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Runs]
+      operationId: testStep
+      description: Executes one step of the draft on a document (or on a supplied input) and returns its output.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { document_id: { type: string }, input: { type: object, additionalProperties: true } } } } } }
+      responses:
+        '200': { description: Step output, content: { application/json: { schema: { $ref: '#/components/schemas/RunStep' } } } }
+  /runs:
+    get:
+      tags: [Runs]
+      operationId: listRuns
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { name: pipeline_id, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/RunStatus' } }
+        - { name: test, in: query, schema: { type: boolean } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/RunPage' } } } }
+  /runs/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Runs]
+      operationId: getRun
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/RunDetail' } } } } }
+  /runs/{id}/events:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Runs]
+      operationId: streamRunEvents
+      description: |
+        Server-sent events for a run. Event names: `run.started`, `step.started`, `step.finished`, `step.failed`,
+        `run.routed`, `run.finished`. Each `data:` line is a JSON `RunEvent`. Supports `Last-Event-ID` resume.
+        Browsers that cannot send headers may pass a short-lived `?access_token=` obtained from `/me`.
+      responses:
+        '200': { description: Event stream, content: { text/event-stream: { schema: { $ref: '#/components/schemas/RunEvent' } } } }
+  /runs/{id}/result:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Runs]
+      operationId: getRunResult
+      description: Extracted fields with confidence, classification, checks and page overlays for the document viewer.
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/RunResult' } } } } }
+  /runs/{id}/cancel:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Runs]
+      operationId: cancelRun
+      responses: { '202': { description: Cancelling }, '409': { $ref: '#/components/responses/Conflict' } }
+  /runs/{id}/retry:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Runs]
+      operationId: retryRun
+      requestBody: { content: { application/json: { schema: { type: object, properties: { from_node_id: { type: string, description: Resume from this step; default is the failed step } } } } } }
+      responses: { '202': { description: New run, content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } } }
+  /ingest/{pipeline_id}:
+    parameters: [{ name: pipeline_id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [Ingest]
+      operationId: ingestDocument
+      description: Intake endpoint for pipelines whose intake step is **API endpoint**. Authenticated by API key with `ingest:write` scope or by HMAC signature.
+      security: [{ apiKeyAuth: [] }, { hmacSignature: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { name: X-DI-Timestamp, in: header, schema: { type: string }, description: Unix seconds; required with HMAC }
+        - { name: X-DI-Signature, in: header, schema: { type: string }, description: 'sha256=hex(HMAC(secret, timestamp + "." + body))' }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, required: [file], properties: { file: { type: string, format: binary }, metadata: { type: string, description: JSON object passed to the run as `intake.metadata` } } }
+      responses:
+        '202': { description: Run queued, content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } } }
+        '409': { description: Pipeline is not active, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  # ───────────────────────── Review ─────────────────────────
+  /review-items:
+    get:
+      tags: [Review]
+      operationId: listReviewItems
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { name: queue, in: query, schema: { type: string } }
+        - { name: assignee, in: query, schema: { type: string, description: 'Member id or `me` or `unassigned`' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewItemPage' } } } }
+  /review-items/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Review]
+      operationId: getReviewItem
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewItemDetail' } } } } }
+  /review-items/{id}/claim:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Review]
+      operationId: claimReviewItem
+      responses: { '200': { description: Assigned to caller, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewItem' } } } }, '409': { $ref: '#/components/responses/Conflict' } }
+  /review-items/{id}/decision:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Review]
+      operationId: decideReviewItem
+      description: Approve (optionally with corrected field values) to resume the run on the step after Human review, or reject to end it.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewDecision' } } } }
+      responses: { '200': { description: Recorded, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewItem' } } } } }
+
+  # ───────────────────────── Connections (credentials) ─────────────────────────
+  /connections:
+    get:
+      tags: [Connections]
+      operationId: listConnections
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { name: service, in: query, schema: { $ref: '#/components/schemas/ServiceId' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ConnectionPage' } } } }
+    post:
+      tags: [Connections]
+      operationId: createConnection
+      description: Stores credentials in the vault. The response never includes secret values.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ConnectionCreate' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Connection' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /connections/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Connections]
+      operationId: getConnection
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Connection' } } } } }
+    patch:
+      tags: [Connections]
+      operationId: updateConnection
+      description: Rename or change non-secret settings. To change secrets send a full `auth` object (rotation).
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ConnectionUpdate' } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Connection' } } } } }
+    delete:
+      tags: [Connections]
+      operationId: deleteConnection
+      description: Returns 409 with the list of users (pipelines, providers, workers, MCP servers) unless `force=true`.
+      parameters: [{ name: force, in: query, schema: { type: boolean, default: false } }]
+      responses: { '204': { description: Deleted }, '409': { $ref: '#/components/responses/Conflict' } }
+  /connections/{id}/test:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Connections]
+      operationId: testConnection
+      description: Performs a harmless authenticated call against the service (e.g., list models, SELECT 1, Gmail profile).
+      responses: { '200': { description: Result, content: { application/json: { schema: { $ref: '#/components/schemas/TestResult' } } } } }
+  /connections/{id}/usage:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Connections]
+      operationId: getConnectionUsage
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/UsageRef' } } } } } } }
+  /connections/{id}/oauth/authorize:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Connections]
+      operationId: startOAuth
+      description: For `oauth2_authorization_code` connections (e.g., Gmail). Open `authorization_url` in a popup; the backend completes the exchange at `/oauth/callback` and marks the connection connected.
+      requestBody: { content: { application/json: { schema: { type: object, properties: { redirect_after: { type: string, format: uri } } } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: object, required: [authorization_url], properties: { authorization_url: { type: string, format: uri }, state: { type: string } } } } } } }
+  /oauth/callback:
+    get:
+      tags: [Connections]
+      operationId: oauthCallback
+      security: []
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses: { '302': { description: Redirect back to the portal } }
+
+  # ───────────────────────── AI model providers ─────────────────────────
+  /providers:
+    get:
+      tags: [Providers]
+      operationId: listProviders
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Provider' } } } } } } }
+    post:
+      tags: [Providers]
+      operationId: createProvider
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProviderCreate' } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Provider' } } } } }
+  /providers/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Providers]
+      operationId: getProvider
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Provider' } } } } }
+    patch:
+      tags: [Providers]
+      operationId: updateProvider
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProviderUpdate' } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Provider' } } } } }
+    delete:
+      tags: [Providers]
+      operationId: deleteProvider
+      responses: { '204': { description: Deleted }, '409': { $ref: '#/components/responses/Conflict' } }
+  /providers/{id}/test:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Providers]
+      operationId: testProvider
+      requestBody: { content: { application/json: { schema: { type: object, properties: { model: { type: string } } } } } }
+      responses: { '200': { description: Result, content: { application/json: { schema: { $ref: '#/components/schemas/TestResult' } } } } }
+  /providers/{id}/models/sync:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Providers]
+      operationId: syncProviderModels
+      description: Refreshes the model list from the provider's API (where supported) or deployment list (Azure OpenAI).
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Provider' } } } } }
+
+  # ───────────────────────── Workers (OCR, layout, image, spreadsheet …) ─────────────────────────
+  /workers:
+    get:
+      tags: [Workers]
+      operationId: listWorkers
+      parameters: [{ name: kind, in: query, schema: { $ref: '#/components/schemas/WorkerKind' } }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Worker' } } } } } } }
+    post:
+      tags: [Workers]
+      operationId: registerWorker
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/WorkerCreate' } } } }
+      responses: { '201': { description: Registered, content: { application/json: { schema: { $ref: '#/components/schemas/Worker' } } } } }
+  /workers/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Workers]
+      operationId: getWorker
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Worker' } } } } }
+    patch:
+      tags: [Workers]
+      operationId: updateWorker
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/WorkerUpdate' } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Worker' } } } } }
+    delete:
+      tags: [Workers]
+      operationId: deleteWorker
+      responses: { '204': { description: Deleted }, '409': { $ref: '#/components/responses/Conflict' } }
+  /workers/{id}/health:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Workers]
+      operationId: checkWorkerHealth
+      description: Calls the worker's health endpoint with its connection's credentials.
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/WorkerHealth' } } } } }
+  /workers/{id}/invoke:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Workers]
+      operationId: invokeWorker
+      description: Test call. The backend sends the document to the worker and normalises the response through the worker's adapter into `PagesResult`.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [document_id], properties: { document_id: { type: string }, options: { type: object, additionalProperties: true } } } } } }
+      responses: { '200': { description: Normalised output, content: { application/json: { schema: { $ref: '#/components/schemas/PagesResult' } } } } }
+
+  # ───────────────────────── MCP servers ─────────────────────────
+  /mcp-servers:
+    get:
+      tags: [MCP servers]
+      operationId: listMcpServers
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/McpServer' } } } } } } }
+    post:
+      tags: [MCP servers]
+      operationId: createMcpServer
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/McpServerCreate' } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/McpServer' } } } } }
+  /mcp-servers/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [MCP servers]
+      operationId: getMcpServer
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/McpServer' } } } } }
+    patch:
+      tags: [MCP servers]
+      operationId: updateMcpServer
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/McpServerUpdate' } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/McpServer' } } } } }
+    delete:
+      tags: [MCP servers]
+      operationId: deleteMcpServer
+      responses: { '204': { description: Deleted }, '409': { $ref: '#/components/responses/Conflict' } }
+  /mcp-servers/{id}/discover:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [MCP servers]
+      operationId: discoverMcpTools
+      description: Connects (initialize + tools/list) and stores the tool list.
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/McpServer' } } } } }
+  /mcp-servers/{id}/tools/{tool}/call:
+    parameters: [{ $ref: '#/components/parameters/Id' }, { name: tool, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [MCP servers]
+      operationId: callMcpTool
+      description: Test a tool with arguments (validated against its input schema).
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { arguments: { type: object, additionalProperties: true } } } } } }
+      responses: { '200': { description: Tool result, content: { application/json: { schema: { type: object, properties: { content: { type: array, items: { type: object, additionalProperties: true } }, is_error: { type: boolean }, latency_ms: { type: integer } } } } } } }
+
+  # ───────────────────────── Knowledge, skills, policies ─────────────────────────
+  /knowledge-collections:
+    get:
+      tags: [Knowledge]
+      operationId: listCollections
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/KnowledgeCollection' } } } } } } }
+    post:
+      tags: [Knowledge]
+      operationId: createCollection
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeCollectionCreate' } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeCollection' } } } } }
+  /knowledge-collections/{id}/documents:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Knowledge]
+      operationId: addCollectionDocuments
+      description: Chunks, embeds (with the collection's embedding model) and indexes documents.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [document_ids], properties: { document_ids: { type: array, items: { type: string } } } } } } }
+      responses: { '202': { description: Indexing started } }
+  /skills:
+    get:
+      tags: [Skills]
+      operationId: listSkills
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Skill' } } } } } } }
+    post:
+      tags: [Skills]
+      operationId: createSkill
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SkillCreate' } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Skill' } } } } }
+  /skills/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Skills]
+      operationId: getSkill
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Skill' } } } } }
+    patch:
+      tags: [Skills]
+      operationId: updateSkill
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SkillCreate' } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Skill' } } } } }
+    delete:
+      tags: [Skills]
+      operationId: deleteSkill
+      responses: { '204': { description: Deleted }, '409': { $ref: '#/components/responses/Conflict' } }
+  /skills/{id}/versions:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Skills]
+      operationId: publishSkillVersion
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [instructions], properties: { instructions: { type: string }, release_note: { type: string } } } } } }
+      responses: { '201': { description: Published, content: { application/json: { schema: { $ref: '#/components/schemas/Skill' } } } } }
+  /policies:
+    get:
+      tags: [Policies]
+      operationId: listPolicies
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Policy' } } } } } } }
+    post:
+      tags: [Policies]
+      operationId: createPolicy
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PolicyCreate' } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Policy' } } } } }
+  /policies/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [Policies]
+      operationId: updatePolicy
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PolicyUpdate' } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Policy' } } } } }
+    delete:
+      tags: [Policies]
+      operationId: deletePolicy
+      responses: { '204': { description: Deleted } }
+
+  # ───────────────────────── Metrics, audit, webhooks, settings ─────────────────────────
+  /metrics/overview:
+    get:
+      tags: [Metrics]
+      operationId: getMetricsOverview
+      parameters: [{ name: window, in: query, schema: { type: string, enum: [24h, 7d, 30d], default: 24h } }]
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MetricsOverview' } } } } }
+  /audit-events:
+    get:
+      tags: [Audit]
+      operationId: listAuditEvents
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { name: resource_type, in: query, schema: { type: string } }
+        - { name: actor_id, in: query, schema: { type: string } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuditEventPage' } } } } }
+  /webhooks:
+    get:
+      tags: [Webhooks]
+      operationId: listWebhooks
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/WebhookSubscription' } } } } } } }
+    post:
+      tags: [Webhooks]
+      operationId: createWebhook
+      description: Outbound event delivery, signed with `X-DI-Signature` (HMAC-SHA256). The signing secret is returned once.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/WebhookCreate' } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { allOf: [{ $ref: '#/components/schemas/WebhookSubscription' }, { type: object, properties: { signing_secret: { type: string } } }] } } } } }
+  /webhooks/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    delete:
+      tags: [Webhooks]
+      operationId: deleteWebhook
+      responses: { '204': { description: Deleted } }
+  /settings:
+    get:
+      tags: [Settings]
+      operationId: getSettings
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/WorkspaceSettings' } } } } }
+    patch:
+      tags: [Settings]
+      operationId: updateSettings
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/WorkspaceSettings' } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/WorkspaceSettings' } } } } }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OIDC access token for portal users. Workspace and role are claims.
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: 'Workspace API key (`dik_live_…` / `dik_test_…`). Scopes: pipelines:read, pipelines:write, runs:read, runs:write, ingest:write, review:write, connections:write, admin.'
+    hmacSignature:
+      type: apiKey
+      in: header
+      name: X-DI-Signature
+      description: 'HMAC-SHA256 of `timestamp + "." + raw_body` with the pipeline intake secret; send `X-DI-Timestamp`. Requests older than 5 minutes are rejected.'
+
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string } }
+    VersionNo: { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+    Cursor: { name: cursor, in: query, schema: { type: string } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 128 } }
+
+  responses:
+    Unauthorized: { description: Missing or invalid credentials, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    NotFound: { description: Not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Conflict: { description: Conflict with current state, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    PreconditionFailed: { description: ETag mismatch, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    ValidationFailed: { description: Request or graph failed validation, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  schemas:
+    # ── common
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri, examples: ['https://docs.docintel.example.com/errors/validation'] }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string, description: Stable machine-readable code, examples: [pipeline_invalid, connection_in_use, etag_mismatch] }
+        issues: { type: array, items: { $ref: '#/components/schemas/ValidationIssue' } }
+        usages: { type: array, items: { $ref: '#/components/schemas/UsageRef' } }
+    Timestamps:
+      type: object
+      properties:
+        created_at: { type: string, format: date-time, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+    UsageRef:
+      type: object
+      required: [resource_type, resource_id, label]
+      properties:
+        resource_type: { type: string, enum: [pipeline, provider, worker, mcp_server, knowledge_collection, webhook] }
+        resource_id: { type: string }
+        node_id: { type: string }
+        label: { type: string }
+    TestResult:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        latency_ms: { type: integer }
+        message: { type: string }
+        details: { type: object, additionalProperties: true }
+
+    # ── identity
+    Role: { type: string, enum: [admin, builder, reviewer, viewer] }
+    Principal:
+      type: object
+      required: [kind, id, workspace]
+      properties:
+        kind: { type: string, enum: [user, api_key] }
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/Role' }
+        scopes: { type: array, items: { type: string } }
+        workspace: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string }, environment: { type: string, enum: [sandbox, production] }, region: { type: string } } }
+        sse_token: { type: string, description: Short-lived token for EventSource connections }
+    Member:
+      type: object
+      required: [id, email, role]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/Role' }
+        status: { type: string, enum: [active, invited, disabled] }
+        last_seen_at: { type: string, format: date-time }
+    ApiKey:
+      type: object
+      required: [id, name, prefix, scopes]
+      properties:
+        id: { type: string, examples: [key_7Hf2] }
+        name: { type: string }
+        prefix: { type: string, description: First characters shown in lists, examples: [dik_live_7Hf2] }
+        scopes: { type: array, items: { type: string } }
+        expires_at: { type: [string, 'null'], format: date-time }
+        last_used_at: { type: [string, 'null'], format: date-time }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+    ApiKeyCreate:
+      type: object
+      required: [name, scopes]
+      properties:
+        name: { type: string, maxLength: 80 }
+        scopes: { type: array, minItems: 1, items: { type: string } }
+        expires_in_days: { type: integer, minimum: 1, maximum: 730 }
+        allowed_ips: { type: array, items: { type: string, description: CIDR } }
+    ApiKeyWithSecret:
+      allOf:
+        - { $ref: '#/components/schemas/ApiKey' }
+        - type: object
+          required: [secret]
+          properties: { secret: { type: string, description: Shown once } }
+    ApiKeyPage:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/ApiKey' } }, next_cursor: { type: [string, 'null'] } }
+
+    # ── catalog
+    Stage: { type: string, enum: [intake, prepare, read, understand, validate, decide, deliver, ai] }
+    SlotName: { type: string, enum: [model, memory, tools, knowledge, parser] }
+    FieldSpec:
+      type: object
+      required: [key, label, type]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        type: { type: string, enum: [text, number, select, chips, switch, textarea, range, connection, worker, mcp_server, mcp_tools, skill, provider, model, provider_connection, schema] }
+        required: { type: boolean }
+        default: {}
+        options: { type: array, items: { type: string } }
+        service: { $ref: '#/components/schemas/ServiceId' }
+        hint: { type: string }
+        monospace: { type: boolean }
+        min: { type: number }
+        max: { type: number }
+    StepType:
+      type: object
+      required: [type, stage, name, description, fields]
+      properties:
+        type: { type: string, examples: [read.ocr, ai.extract, ai.model, tool.mcp] }
+        stage: { $ref: '#/components/schemas/Stage' }
+        name: { type: string }
+        description: { type: string }
+        icon: { type: string, description: IBM Carbon icon name }
+        ai: { type: boolean }
+        has_input: { type: boolean, default: true }
+        outputs: { type: array, items: { type: string }, description: 'Static outputs; dynamic outputs are derived from config (route.type → paths + other).' }
+        slots: { type: array, items: { $ref: '#/components/schemas/SlotName' } }
+        required_slots: { type: array, items: { $ref: '#/components/schemas/SlotName' } }
+        plugs_into: { $ref: '#/components/schemas/SlotName' }
+        fields: { type: array, items: { $ref: '#/components/schemas/FieldSpec' } }
+    ServiceId:
+      type: string
+      enum: [gmail, microsoft_365_mail, whatsapp_business, slack, anthropic, openai, azure_openai, google_gemini, ollama, openai_compatible, postgresql, mssql, amazon_s3, azure_blob, sftp, qdrant, pgvector, azure_ai_search, redis, http_api, mcp, document_worker]
+    ServiceDefinition:
+      type: object
+      required: [id, name, auth_types]
+      properties:
+        id: { $ref: '#/components/schemas/ServiceId' }
+        name: { type: string }
+        category: { type: string, enum: [mail, messaging, model_provider, database, storage, vector_store, api, mcp, worker] }
+        auth_types: { type: array, items: { $ref: '#/components/schemas/AuthType' } }
+        settings_fields: { type: array, items: { $ref: '#/components/schemas/FieldSpec' }, description: Non-secret settings (endpoint, region, account …) }
+        docs_url: { type: string, format: uri }
+
+    # ── auth schemes for connections
+    AuthType: { type: string, enum: [api_key, bearer, basic, oauth2_client_credentials, oauth2_authorization_code, hmac, mtls, aws_sigv4, azure_ad_client, none] }
+    AuthConfig:
+      description: Credential material. Write-only; never returned.
+      oneOf:
+        - { $ref: '#/components/schemas/ApiKeyAuth' }
+        - { $ref: '#/components/schemas/BearerAuth' }
+        - { $ref: '#/components/schemas/BasicAuth' }
+        - { $ref: '#/components/schemas/OAuth2ClientCredentials' }
+        - { $ref: '#/components/schemas/OAuth2AuthorizationCode' }
+        - { $ref: '#/components/schemas/HmacAuth' }
+        - { $ref: '#/components/schemas/MtlsAuth' }
+        - { $ref: '#/components/schemas/AwsSigV4Auth' }
+        - { $ref: '#/components/schemas/AzureAdClientAuth' }
+        - { $ref: '#/components/schemas/NoAuth' }
+      discriminator:
+        propertyName: type
+        mapping:
+          api_key: '#/components/schemas/ApiKeyAuth'
+          bearer: '#/components/schemas/BearerAuth'
+          basic: '#/components/schemas/BasicAuth'
+          oauth2_client_credentials: '#/components/schemas/OAuth2ClientCredentials'
+          oauth2_authorization_code: '#/components/schemas/OAuth2AuthorizationCode'
+          hmac: '#/components/schemas/HmacAuth'
+          mtls: '#/components/schemas/MtlsAuth'
+          aws_sigv4: '#/components/schemas/AwsSigV4Auth'
+          azure_ad_client: '#/components/schemas/AzureAdClientAuth'
+          none: '#/components/schemas/NoAuth'
+    ApiKeyAuth:
+      type: object
+      required: [type, key]
+      properties:
+        type: { const: api_key }
+        key: { type: string, writeOnly: true }
+        placement: { type: string, enum: [header, query], default: header }
+        name: { type: string, default: Authorization, description: 'Header or query parameter name, e.g. x-api-key, api-key' }
+        prefix: { type: string, description: 'Value prefix, e.g. "Bearer "' }
+    BearerAuth:
+      type: object
+      required: [type, token]
+      properties: { type: { const: bearer }, token: { type: string, writeOnly: true } }
+    BasicAuth:
+      type: object
+      required: [type, username, password]
+      properties: { type: { const: basic }, username: { type: string }, password: { type: string, writeOnly: true } }
+    OAuth2ClientCredentials:
+      type: object
+      required: [type, token_url, client_id, client_secret]
+      properties:
+        type: { const: oauth2_client_credentials }
+        token_url: { type: string, format: uri }
+        client_id: { type: string }
+        client_secret: { type: string, writeOnly: true }
+        scopes: { type: array, items: { type: string } }
+        audience: { type: string }
+    OAuth2AuthorizationCode:
+      type: object
+      required: [type, client_id, client_secret]
+      properties:
+        type: { const: oauth2_authorization_code }
+        client_id: { type: string }
+        client_secret: { type: string, writeOnly: true }
+        scopes: { type: array, items: { type: string }, examples: [['https://www.googleapis.com/auth/gmail.modify']] }
+        authorize_url: { type: string, format: uri }
+        token_url: { type: string, format: uri }
+    HmacAuth:
+      type: object
+      required: [type, secret]
+      properties:
+        type: { const: hmac }
+        secret: { type: string, writeOnly: true }
+        algorithm: { type: string, enum: [sha256, sha512], default: sha256 }
+        header: { type: string, default: X-Signature }
+    MtlsAuth:
+      type: object
+      required: [type, client_cert_pem, client_key_pem]
+      properties:
+        type: { const: mtls }
+        client_cert_pem: { type: string }
+        client_key_pem: { type: string, writeOnly: true }
+        ca_cert_pem: { type: string }
+    AwsSigV4Auth:
+      type: object
+      required: [type, access_key_id, secret_access_key, region]
+      properties:
+        type: { const: aws_sigv4 }
+        access_key_id: { type: string }
+        secret_access_key: { type: string, writeOnly: true }
+        session_token: { type: string, writeOnly: true }
+        region: { type: string }
+        role_arn: { type: string }
+    AzureAdClientAuth:
+      type: object
+      required: [type, tenant_id, client_id, client_secret]
+      properties:
+        type: { const: azure_ad_client }
+        tenant_id: { type: string }
+        client_id: { type: string }
+        client_secret: { type: string, writeOnly: true }
+        scope: { type: string }
+    NoAuth:
+      type: object
+      required: [type]
+      properties: { type: { const: none } }
+
+    # ── connections
+    ConnectionStatus: { type: string, enum: [connected, unverified, failing, pending_authorization, expired] }
+    Connection:
+      allOf:
+        - { $ref: '#/components/schemas/Timestamps' }
+        - type: object
+          required: [id, name, service, auth_type, status]
+          properties:
+            id: { type: string, examples: [con_4Pq9] }
+            name: { type: string }
+            service: { $ref: '#/components/schemas/ServiceId' }
+            auth_type: { $ref: '#/components/schemas/AuthType' }
+            settings: { type: object, additionalProperties: true, description: 'Non-secret settings: base_url, endpoint, region, account, database, phone_number_id …' }
+            secret_hint: { type: [string, 'null'], examples: ['••••Rk3w'] }
+            status: { $ref: '#/components/schemas/ConnectionStatus' }
+            last_tested_at: { type: [string, 'null'], format: date-time }
+            last_used_at: { type: [string, 'null'], format: date-time }
+            expires_at: { type: [string, 'null'], format: date-time }
+            usage_count: { type: integer }
+    ConnectionCreate:
+      type: object
+      required: [name, service, auth]
+      properties:
+        name: { type: string, maxLength: 120 }
+        service: { $ref: '#/components/schemas/ServiceId' }
+        settings: { type: object, additionalProperties: true }
+        auth: { $ref: '#/components/schemas/AuthConfig' }
+    ConnectionUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        settings: { type: object, additionalProperties: true }
+        auth: { $ref: '#/components/schemas/AuthConfig' }
+    ConnectionPage:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/Connection' } }, next_cursor: { type: [string, 'null'] } }
+
+    # ── providers
+    ProviderKind: { type: string, enum: [anthropic, openai, azure_openai, google_gemini, ollama, openai_compatible] }
+    ModelInfo:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, description: 'Model id or Azure deployment name' }
+        display_name: { type: string }
+        context_window: { type: integer }
+        supports_tools: { type: boolean }
+        supports_vision: { type: boolean }
+        embedding: { type: boolean, default: false }
+        enabled: { type: boolean, default: true }
+    Provider:
+      allOf:
+        - { $ref: '#/components/schemas/Timestamps' }
+        - type: object
+          required: [id, kind, name, enabled, models]
+          properties:
+            id: { type: string, examples: [prv_anthropic] }
+            kind: { $ref: '#/components/schemas/ProviderKind' }
+            name: { type: string }
+            enabled: { type: boolean }
+            base_url: { type: string, format: uri }
+            connection_id: { type: [string, 'null'] }
+            data_region: { type: string, examples: [Global, UAE North, On-premises] }
+            models: { type: array, items: { $ref: '#/components/schemas/ModelInfo' } }
+            default_model: { type: string }
+            limits: { type: object, properties: { requests_per_minute: { type: integer }, tokens_per_minute: { type: integer }, monthly_budget_usd: { type: number } } }
+            usage_count: { type: integer }
+    ProviderCreate:
+      type: object
+      required: [kind, name]
+      properties:
+        kind: { $ref: '#/components/schemas/ProviderKind' }
+        name: { type: string }
+        base_url: { type: string, format: uri }
+        connection_id: { type: string }
+        data_region: { type: string }
+        models: { type: array, items: { $ref: '#/components/schemas/ModelInfo' } }
+        default_model: { type: string }
+    ProviderUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        enabled: { type: boolean }
+        base_url: { type: string, format: uri }
+        connection_id: { type: [string, 'null'] }
+        data_region: { type: string }
+        models: { type: array, items: { $ref: '#/components/schemas/ModelInfo' } }
+        default_model: { type: string }
+        limits: { type: object, additionalProperties: true }
+
+    # ── workers
+    WorkerKind: { type: string, enum: [ocr, layout, image, spreadsheet, classifier, custom] }
+    WorkerAdapter:
+      type: string
+      enum: [generic_pages_v1, excel_parser_v1, paddle_docparse_v1]
+      description: |
+        How the backend calls the worker and normalises its response into `PagesResult`.
+        - `generic_pages_v1`: POST multipart `file` to `invoke_path`; worker returns `PagesResult` directly.
+        - `excel_parser_v1`: POST multipart `file` to `/to-text`; `{text_repr, sheet_names, total_cells, char_count}` is mapped to one text block per sheet.
+        - `paddle_docparse_v1`: Paddle DocParse response (routes to confirm) mapped to blocks, tables and bounding boxes.
+    Worker:
+      allOf:
+        - { $ref: '#/components/schemas/Timestamps' }
+        - type: object
+          required: [id, name, kind, base_url, adapter]
+          properties:
+            id: { type: string, examples: [wrk_paddle] }
+            name: { type: string }
+            kind: { $ref: '#/components/schemas/WorkerKind' }
+            base_url: { type: string, format: uri }
+            adapter: { $ref: '#/components/schemas/WorkerAdapter' }
+            invoke_path: { type: string, default: /invoke }
+            health_path: { type: string, default: /health }
+            connection_id: { type: [string, 'null'], description: Credentials used for every call (API key, bearer, mTLS …) }
+            accepts: { type: array, items: { type: string }, examples: [[application/pdf, image/png, image/tiff]] }
+            capabilities: { type: array, items: { type: string }, examples: [[text, layout, tables, languages:en,ar]] }
+            timeout_s: { type: integer, default: 60 }
+            max_concurrency: { type: integer, default: 4 }
+            data_region: { type: string }
+            health: { $ref: '#/components/schemas/WorkerHealth' }
+    WorkerCreate:
+      type: object
+      required: [name, kind, base_url, adapter]
+      properties:
+        name: { type: string }
+        kind: { $ref: '#/components/schemas/WorkerKind' }
+        base_url: { type: string, format: uri }
+        adapter: { $ref: '#/components/schemas/WorkerAdapter' }
+        invoke_path: { type: string }
+        health_path: { type: string }
+        connection_id: { type: string }
+        accepts: { type: array, items: { type: string } }
+        capabilities: { type: array, items: { type: string } }
+        timeout_s: { type: integer }
+        max_concurrency: { type: integer }
+        data_region: { type: string }
+    WorkerUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        base_url: { type: string, format: uri }
+        adapter: { $ref: '#/components/schemas/WorkerAdapter' }
+        invoke_path: { type: string }
+        health_path: { type: string }
+        connection_id: { type: [string, 'null'] }
+        timeout_s: { type: integer }
+        max_concurrency: { type: integer }
+    WorkerHealth:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [healthy, degraded, unreachable, unknown] }
+        latency_ms: { type: integer }
+        checked_at: { type: string, format: date-time }
+        message: { type: string }
+    BBox:
+      type: array
+      description: '[x0, y0, x1, y1] in page units (points for PDF, pixels for images)'
+      items: { type: number }
+      minItems: 4
+      maxItems: 4
+    PagesResult:
+      type: object
+      description: Normalised output contract `docintel.pages.v1` produced by every worker adapter.
+      required: [pages]
+      properties:
+        pages:
+          type: array
+          items:
+            type: object
+            required: [n, width, height]
+            properties:
+              n: { type: integer }
+              width: { type: number }
+              height: { type: number }
+              language: { type: string }
+              blocks: { type: array, items: { type: object, required: [text, bbox], properties: { text: { type: string }, bbox: { $ref: '#/components/schemas/BBox' }, confidence: { type: number } } } }
+              tables: { type: array, items: { type: object, properties: { bbox: { $ref: '#/components/schemas/BBox' }, rows: { type: array, items: { type: array, items: { type: string } } } } } }
+              key_values: { type: array, items: { type: object, properties: { key: { type: string }, value: { type: string }, bbox: { $ref: '#/components/schemas/BBox' } } } }
+        text: { type: string }
+        worker_latency_ms: { type: integer }
+
+    # ── MCP servers
+    McpTransport: { type: string, enum: [streamable_http, sse, stdio_gateway] }
+    McpTool:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        input_schema: { type: object, additionalProperties: true }
+        enabled: { type: boolean, default: true }
+    McpServer:
+      allOf:
+        - { $ref: '#/components/schemas/Timestamps' }
+        - type: object
+          required: [id, name, transport, url, enabled]
+          properties:
+            id: { type: string, examples: [mcp_vendors] }
+            name: { type: string }
+            transport: { $ref: '#/components/schemas/McpTransport' }
+            url: { type: string, description: 'Endpoint URL; for stdio_gateway the gateway URL' }
+            connection_id: { type: [string, 'null'], description: 'Credentials (bearer, API key header, OAuth 2.0 client credentials)' }
+            headers: { type: object, additionalProperties: { type: string }, description: Extra non-secret headers }
+            enabled: { type: boolean }
+            tools: { type: array, items: { $ref: '#/components/schemas/McpTool' } }
+            status: { type: string, enum: [connected, failing, unknown] }
+            last_discovered_at: { type: [string, 'null'], format: date-time }
+            usage_count: { type: integer }
+    McpServerCreate:
+      type: object
+      required: [name, transport, url]
+      properties:
+        name: { type: string }
+        transport: { $ref: '#/components/schemas/McpTransport' }
+        url: { type: string }
+        connection_id: { type: string }
+        headers: { type: object, additionalProperties: { type: string } }
+    McpServerUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        url: { type: string }
+        connection_id: { type: [string, 'null'] }
+        headers: { type: object, additionalProperties: { type: string } }
+        enabled: { type: boolean }
+        tools: { type: array, items: { type: object, required: [name, enabled], properties: { name: { type: string }, enabled: { type: boolean } } } }
+
+    # ── knowledge, skills, policies
+    KnowledgeCollection:
+      type: object
+      required: [id, name, connection_id]
+      properties:
+        id: { type: string }
+        name: { type: string, examples: [vendor_policies] }
+        connection_id: { type: string, description: Vector store connection (Qdrant, pgvector, Azure AI Search) }
+        embedding_provider_id: { type: string }
+        embedding_model: { type: string }
+        document_count: { type: integer }
+        chunk_count: { type: integer }
+        status: { type: string, enum: [ready, indexing, failed] }
+    KnowledgeCollectionCreate:
+      type: object
+      required: [name, connection_id, embedding_provider_id, embedding_model]
+      properties:
+        name: { type: string, pattern: '^[a-z][a-z0-9_]*$' }
+        connection_id: { type: string }
+        embedding_provider_id: { type: string }
+        embedding_model: { type: string }
+        chunk_size: { type: integer, default: 800 }
+    Skill:
+      allOf:
+        - { $ref: '#/components/schemas/Timestamps' }
+        - type: object
+          required: [id, name, version]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            description: { type: string }
+            instructions: { type: string }
+            version: { type: integer }
+            versions: { type: array, items: { type: object, properties: { version: { type: integer }, release_note: { type: string }, published_at: { type: string, format: date-time }, published_by: { type: string } } } }
+            usage_count: { type: integer }
+    SkillCreate:
+      type: object
+      required: [name, instructions]
+      properties: { name: { type: string }, description: { type: string }, instructions: { type: string } }
+    PolicyKind: { type: string, enum: [pii_redaction, prompt_injection, schema_enforcement, data_residency, retention, model_allowlist, custom] }
+    Policy:
+      type: object
+      required: [id, name, kind, enabled, scope]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        kind: { $ref: '#/components/schemas/PolicyKind' }
+        enabled: { type: boolean }
+        scope: { type: object, properties: { all_pipelines: { type: boolean }, pipeline_ids: { type: array, items: { type: string } }, owner_teams: { type: array, items: { type: string } } } }
+        config: { type: object, additionalProperties: true, description: 'Kind-specific, e.g. {entities:[...]} or {allowed_regions:["UAE North"]} or {retention_days:2555}' }
+    PolicyCreate:
+      type: object
+      required: [name, kind, scope]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        kind: { $ref: '#/components/schemas/PolicyKind' }
+        enabled: { type: boolean, default: true }
+        scope: { type: object, additionalProperties: true }
+        config: { type: object, additionalProperties: true }
+    PolicyUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        enabled: { type: boolean }
+        scope: { type: object, additionalProperties: true }
+        config: { type: object, additionalProperties: true }
+
+    # ── pipelines
+    PipelineStatus: { type: string, enum: [active, paused, draft] }
+    Node:
+      type: object
+      required: [id, type, name, x, y, config]
+      properties:
+        id: { type: string }
+        type: { type: string, description: StepType.type }
+        name: { type: string }
+        x: { type: number }
+        y: { type: number }
+        config: { type: object, additionalProperties: true }
+        settings:
+          type: object
+          properties:
+            retries: { type: integer, minimum: 0, maximum: 5, default: 2 }
+            timeout_s: { type: integer, minimum: 1, default: 60 }
+            on_error: { type: string, enum: [stop, continue, error_output], default: stop }
+            notes: { type: string }
+    Edge:
+      type: object
+      required: [id, from, from_port, to]
+      properties:
+        id: { type: string }
+        from: { type: string }
+        from_port: { type: string, description: "out, a route name, pass, review, error — or plug for slot edges" }
+        to: { type: string }
+        slot: { $ref: '#/components/schemas/SlotName' }
+    Graph:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes: { type: array, items: { $ref: '#/components/schemas/Node' } }
+        edges: { type: array, items: { $ref: '#/components/schemas/Edge' } }
+    ValidationIssue:
+      type: object
+      required: [level, message]
+      properties:
+        level: { type: string, enum: [error, warning] }
+        code: { type: string, examples: [missing_intake, no_incoming_connection, required_field, missing_model, invalid_schema_field, provider_disabled, loop] }
+        message: { type: string }
+        node_id: { type: string }
+        field: { type: string }
+    ValidationResult:
+      type: object
+      required: [valid, issues]
+      properties: { valid: { type: boolean }, issues: { type: array, items: { $ref: '#/components/schemas/ValidationIssue' } } }
+    PipelineKpi:
+      type: object
+      properties:
+        documents_24h: { type: integer }
+        straight_through_rate: { type: number, description: '0–1' }
+        median_ms: { type: integer }
+        review_waiting: { type: integer }
+    Pipeline:
+      allOf:
+        - { $ref: '#/components/schemas/Timestamps' }
+        - type: object
+          required: [id, name, status, live_version, owner_team]
+          properties:
+            id: { type: string, examples: [pl_ap_invoices] }
+            name: { type: string }
+            description: { type: string }
+            status: { $ref: '#/components/schemas/PipelineStatus' }
+            owner_team: { type: string }
+            live_version: { type: [integer, 'null'] }
+            draft_changes: { type: array, items: { type: string }, description: Human-readable change list since the live version }
+            intake_type: { type: string }
+            step_count: { type: integer }
+            ai_component_count: { type: integer }
+            kpi: { $ref: '#/components/schemas/PipelineKpi' }
+            updated_by: { type: string }
+    PipelineCreate:
+      type: object
+      required: [name, intake_type]
+      properties:
+        name: { type: string, maxLength: 120 }
+        description: { type: string }
+        owner_team: { type: string }
+        intake_type: { type: string, examples: [intake.email] }
+    PipelineUpdate:
+      type: object
+      properties: { name: { type: string }, description: { type: string }, owner_team: { type: string } }
+    PipelinePage:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/Pipeline' } }, next_cursor: { type: [string, 'null'] } }
+    Draft:
+      type: object
+      required: [pipeline_id, graph, etag]
+      properties:
+        pipeline_id: { type: string }
+        graph: { $ref: '#/components/schemas/Graph' }
+        etag: { type: string }
+        changes: { type: array, items: { type: string } }
+        saved_at: { type: string, format: date-time }
+        saved_by: { type: string }
+        issues: { type: array, items: { $ref: '#/components/schemas/ValidationIssue' } }
+    DraftSave:
+      type: object
+      required: [graph]
+      properties:
+        graph: { $ref: '#/components/schemas/Graph' }
+        change: { type: string, description: 'Short description of this edit, e.g. Added "Extract fields"' }
+    VersionSummary:
+      type: object
+      required: [version, published_at, published_by]
+      properties:
+        version: { type: integer }
+        release_note: { type: string }
+        published_at: { type: string, format: date-time }
+        published_by: { type: string }
+        live: { type: boolean }
+    Version:
+      allOf:
+        - { $ref: '#/components/schemas/VersionSummary' }
+        - type: object
+          required: [graph]
+          properties: { graph: { $ref: '#/components/schemas/Graph' } }
+    Template:
+      type: object
+      required: [id, name, step_count]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        step_count: { type: integer }
+        ai_component_count: { type: integer }
+
+    # ── documents & runs
+    Document:
+      type: object
+      required: [id, filename, mime_type, pages]
+      properties:
+        id: { type: string, examples: [doc_8f21] }
+        filename: { type: string }
+        mime_type: { type: string }
+        size_bytes: { type: integer }
+        pages: { type: integer }
+        sha256: { type: string }
+        uploaded_at: { type: string, format: date-time }
+        retention_until: { type: [string, 'null'], format: date-time }
+    RunStatus: { type: string, enum: [queued, running, review, completed, failed, cancelled] }
+    TestRunCreate:
+      type: object
+      required: [document_id]
+      properties:
+        document_id: { type: string }
+        version: { oneOf: [{ type: integer }, { const: draft }], default: draft }
+        deliver: { type: boolean, default: false, description: When false, deliver steps are simulated }
+    Run:
+      type: object
+      required: [id, pipeline_id, status, test]
+      properties:
+        id: { type: string, examples: [run_48210] }
+        pipeline_id: { type: string }
+        pipeline_version: { oneOf: [{ type: integer }, { const: draft }] }
+        document: { $ref: '#/components/schemas/Document' }
+        status: { $ref: '#/components/schemas/RunStatus' }
+        test: { type: boolean }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+        duration_ms: { type: [integer, 'null'] }
+        field_count: { type: integer }
+        error: { $ref: '#/components/schemas/Problem' }
+    RunPage:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/Run' } }, next_cursor: { type: [string, 'null'] } }
+    RunStep:
+      type: object
+      required: [node_id, status]
+      properties:
+        node_id: { type: string }
+        status: { type: string, enum: [pending, running, completed, failed, skipped] }
+        started_at: { type: string, format: date-time }
+        duration_ms: { type: integer }
+        attempt: { type: integer }
+        output_port: { type: string }
+        output: { type: object, additionalProperties: true }
+        usage: { type: object, properties: { input_tokens: { type: integer }, output_tokens: { type: integer }, cost_usd: { type: number } } }
+        error: { $ref: '#/components/schemas/Problem' }
+    RunDetail:
+      allOf:
+        - { $ref: '#/components/schemas/Run' }
+        - type: object
+          properties: { steps: { type: array, items: { $ref: '#/components/schemas/RunStep' } } }
+    RunEvent:
+      type: object
+      required: [event, run_id, at]
+      properties:
+        event: { type: string, enum: [run.started, step.started, step.finished, step.failed, run.routed, run.finished] }
+        run_id: { type: string }
+        at: { type: string, format: date-time }
+        node_id: { type: string }
+        step: { $ref: '#/components/schemas/RunStep' }
+        status: { $ref: '#/components/schemas/RunStatus' }
+        layers: { type: array, items: { type: string, enum: [blocks, tables, fields, redactions] }, description: Overlay layers now available for the document viewer }
+    ExtractedField:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [string, number, date, boolean, array] }
+        value: {}
+        confidence: { type: number }
+        required: { type: boolean }
+        pii: { type: boolean }
+        masked: { type: boolean }
+        page: { type: integer }
+        bbox: { $ref: '#/components/schemas/BBox' }
+    Check:
+      type: object
+      required: [name, passed]
+      properties: { name: { type: string }, passed: { type: boolean }, detail: { type: string }, node_id: { type: string } }
+    RunResult:
+      type: object
+      required: [run_id]
+      properties:
+        run_id: { type: string }
+        classification: { type: object, properties: { type: { type: string }, confidence: { type: number } } }
+        fields: { type: array, items: { $ref: '#/components/schemas/ExtractedField' } }
+        checks: { type: array, items: { $ref: '#/components/schemas/Check' } }
+        path: { type: object, additionalProperties: { type: string }, description: Chosen output per decision node }
+        overlays:
+          type: object
+          properties:
+            blocks: { type: array, items: { type: object, properties: { page: { type: integer }, bbox: { $ref: '#/components/schemas/BBox' } } } }
+            tables: { type: array, items: { type: object, properties: { page: { type: integer }, bbox: { $ref: '#/components/schemas/BBox' } } } }
+            redactions: { type: array, items: { type: object, properties: { page: { type: integer }, bbox: { $ref: '#/components/schemas/BBox' }, entity: { type: string } } } }
+
+    # ── review
+    ReviewItem:
+      type: object
+      required: [id, run_id, pipeline_id, document, reason, queue, created_at]
+      properties:
+        id: { type: string }
+        run_id: { type: string }
+        pipeline_id: { type: string }
+        document: { $ref: '#/components/schemas/Document' }
+        reason: { type: string, examples: ['Low confidence · total_amount 0.71'] }
+        reason_code: { type: string, enum: [low_confidence, rule_failed, no_master_match, manual] }
+        queue: { type: string }
+        assignee: { type: [string, 'null'] }
+        sla_due_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        status: { type: string, enum: [open, claimed, approved, rejected] }
+    ReviewItemDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ReviewItem' }
+        - type: object
+          properties: { result: { $ref: '#/components/schemas/RunResult' } }
+    ReviewItemPage:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/ReviewItem' } }, next_cursor: { type: [string, 'null'] } }
+    ReviewDecision:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, enum: [approve, reject, return_to_queue] }
+        corrections: { type: object, additionalProperties: true, description: Field name → corrected value }
+        comment: { type: string }
+
+    # ── metrics, audit, webhooks, settings
+    MetricsOverview:
+      type: object
+      properties:
+        window: { type: string }
+        documents: { type: integer }
+        documents_change: { type: number }
+        straight_through_rate: { type: number }
+        straight_through_change: { type: number }
+        review_waiting: { type: integer }
+        review_near_sla: { type: integer }
+        median_ms: { type: integer }
+        median_change_ms: { type: integer }
+    AuditEvent:
+      type: object
+      required: [id, at, actor, action, resource_type, resource_id]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        actor: { type: object, properties: { kind: { type: string, enum: [user, api_key, system] }, id: { type: string }, name: { type: string } } }
+        action: { type: string, examples: [pipeline.published, connection.rotated, review.approved] }
+        resource_type: { type: string }
+        resource_id: { type: string }
+        ip: { type: string }
+        details: { type: object, additionalProperties: true }
+    AuditEventPage:
+      type: object
+      required: [data]
+      properties: { data: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }, next_cursor: { type: [string, 'null'] } }
+    WebhookSubscription:
+      type: object
+      required: [id, url, events, enabled]
+      properties:
+        id: { type: string }
+        url: { type: string, format: uri }
+        events: { type: array, items: { type: string, enum: [run.completed, run.failed, review.created, review.decided, pipeline.published, connection.failing] } }
+        enabled: { type: boolean }
+        pipeline_ids: { type: array, items: { type: string } }
+    WebhookCreate:
+      type: object
+      required: [url, events]
+      properties:
+        url: { type: string, format: uri }
+        events: { type: array, items: { type: string } }
+        pipeline_ids: { type: array, items: { type: string } }
+    WorkspaceSettings:
+      type: object
+      properties:
+        name: { type: string }
+        environment: { type: string, enum: [sandbox, production] }
+        default_region: { type: string }
+        retention_days: { type: integer }
+        allowed_regions: { type: array, items: { type: string } }
+        sso: { type: object, properties: { provider: { type: string }, issuer: { type: string } } }
