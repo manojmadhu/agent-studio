@@ -1,0 +1,404 @@
+{
+  "_meta": {
+    "source": "portal/src/api/mock/sampleData.ts + catalog.ts (INVOICE_SCHEMA, RECEIPT_SCHEMA) + runEngine.ts constants",
+    "default_document_id": "doc_inv_sample"
+  },
+  "documents": [
+    {
+      "id": "doc_inv_sample",
+      "filename": "INV-2026-0417.pdf",
+      "mime_type": "application/pdf",
+      "pages": 1,
+      "kind": "inv",
+      "doc_kind": "invoice"
+    },
+    {
+      "id": "doc_rcp_sample",
+      "filename": "receipt_0918.jpg",
+      "mime_type": "image/jpeg",
+      "pages": 1,
+      "kind": "rcp",
+      "doc_kind": "receipt"
+    }
+  ],
+  "values": {
+    "inv": {
+      "invoice_number": [
+        "INV-2026-0417",
+        0.99
+      ],
+      "vendor_name": [
+        "Gulf Office Supplies LLC",
+        0.98
+      ],
+      "vendor_trn": [
+        "100354872600003",
+        0.97
+      ],
+      "invoice_date": [
+        "2026-11-18",
+        0.98
+      ],
+      "due_date": [
+        "2026-12-18",
+        0.95
+      ],
+      "po_number": [
+        "PO-88213",
+        0.93
+      ],
+      "subtotal": [
+        12400,
+        0.97
+      ],
+      "vat_amount": [
+        620,
+        0.96
+      ],
+      "total_amount": [
+        13020,
+        0.88
+      ],
+      "iban": [
+        "AE07 0331 2345 6789 0123 456",
+        0.94
+      ]
+    },
+    "rcp": {
+      "merchant": [
+        "Example Hypermarket · Mall branch",
+        0.95
+      ],
+      "purchase_date": [
+        "2026-11-16",
+        0.64
+      ],
+      "total_amount": [
+        186.4,
+        0.93
+      ],
+      "vat_amount": [
+        8.88,
+        0.9
+      ],
+      "card_last4": [
+        "4417",
+        0.97
+      ]
+    }
+  },
+  "schemas": {
+    "inv": [
+      {
+        "name": "invoice_number",
+        "type": "string",
+        "req": true
+      },
+      {
+        "name": "vendor_name",
+        "type": "string",
+        "req": true
+      },
+      {
+        "name": "vendor_trn",
+        "type": "string",
+        "req": true
+      },
+      {
+        "name": "invoice_date",
+        "type": "date",
+        "req": true
+      },
+      {
+        "name": "due_date",
+        "type": "date"
+      },
+      {
+        "name": "po_number",
+        "type": "string"
+      },
+      {
+        "name": "subtotal",
+        "type": "number",
+        "req": true
+      },
+      {
+        "name": "vat_amount",
+        "type": "number",
+        "req": true
+      },
+      {
+        "name": "total_amount",
+        "type": "number",
+        "req": true
+      },
+      {
+        "name": "iban",
+        "type": "string",
+        "pii": true
+      }
+    ],
+    "rcp": [
+      {
+        "name": "merchant",
+        "type": "string",
+        "req": true
+      },
+      {
+        "name": "purchase_date",
+        "type": "date",
+        "req": true
+      },
+      {
+        "name": "total_amount",
+        "type": "number",
+        "req": true
+      },
+      {
+        "name": "vat_amount",
+        "type": "number"
+      },
+      {
+        "name": "card_last4",
+        "type": "string",
+        "pii": true
+      }
+    ]
+  },
+  "engine": {
+    "queued_delay_ms": 30,
+    "step_duration_ms": {
+      "ai": 1100,
+      "read": 700,
+      "other": 380,
+      "random_extra_max": 250
+    },
+    "classification_confidence": 0.96,
+    "default_threshold": 0.85,
+    "ai_usage": {
+      "input_tokens": 2310,
+      "output_tokens": 268,
+      "cost_usd": 0.011
+    },
+    "review_ticket": "REV-1182"
+  },
+  "step_defaults": {
+    "intake.email": {
+      "conn": "con_gmail",
+      "filter": "in:inbox has:attachment",
+      "poll": "5 minutes",
+      "markRead": true
+    },
+    "intake.upload": {
+      "types": "pdf, png, jpg, tiff",
+      "maxMb": 25
+    },
+    "intake.whatsapp": {
+      "conn": "con_wa"
+    },
+    "intake.api": {
+      "path": "/v1/documents",
+      "auth": "HMAC signature"
+    },
+    "intake.storage": {
+      "conn": "",
+      "path": "/inbound/scans"
+    },
+    "prep.enhance": {
+      "ops": [
+        "Deskew",
+        "Auto-rotate",
+        "Denoise"
+      ],
+      "dpi": 300
+    },
+    "prep.split": {
+      "mode": "Detected document boundaries"
+    },
+    "read.ocr": {
+      "worker": "wrk_paddle",
+      "lang": "English + Arabic",
+      "mode": "Text and layout"
+    },
+    "read.layout": {
+      "detect": [
+        "Tables",
+        "Key-value pairs"
+      ]
+    },
+    "read.sheet": {
+      "worker": "wrk_excel",
+      "max": 14000
+    },
+    "ai.classify": {
+      "classes": "invoice, receipt, credit_note"
+    },
+    "ai.extract": {
+      "skill": "skl_invoice",
+      "instructions": "Extract the fields exactly as printed. Amounts as numbers in the document currency. Dates as YYYY-MM-DD."
+    },
+    "ai.agent": {
+      "skill": "none",
+      "instructions": "",
+      "maxSteps": 8
+    },
+    "val.rules": {
+      "rules": [
+        "Total = subtotal + VAT",
+        "Due date after invoice date",
+        "No duplicate invoice number"
+      ],
+      "onFail": "Send to review"
+    },
+    "val.pii": {
+      "entities": [
+        "Email",
+        "Phone",
+        "IBAN",
+        "Card number"
+      ],
+      "mode": "Mask"
+    },
+    "val.lookup": {
+      "server": "mcp_vendors",
+      "tool": "match_vendor",
+      "key": "Vendor TRN"
+    },
+    "val.injection": {
+      "level": "Medium"
+    },
+    "route.type": {
+      "paths": "invoice, receipt"
+    },
+    "route.confidence": {
+      "threshold": 0.85
+    },
+    "review.human": {
+      "queue": "Accounts payable",
+      "sla": 4
+    },
+    "out.erp": {
+      "conn": "con_erp",
+      "object": "AP invoice (draft)"
+    },
+    "out.db": {
+      "conn": "con_pg",
+      "table": "extracted_documents"
+    },
+    "out.email": {
+      "conn": "con_gmail",
+      "to": "{{intake.sender}}",
+      "subject": "We could not process {{document.name}}"
+    },
+    "out.whatsapp": {
+      "conn": "con_wa",
+      "template": "document_processed"
+    },
+    "out.export": {
+      "format": "JSON",
+      "path": "exports/{{run.id}}.json"
+    },
+    "ai.model": {
+      "provider": "prv_anthropic",
+      "model": "claude-sonnet-5-5",
+      "conn": "",
+      "temperature": 0.1,
+      "maxTokens": 2048
+    },
+    "ai.memory": {
+      "scope": "Per document",
+      "window": 10
+    },
+    "ai.knowledge": {
+      "collection": "vendor_policies",
+      "topK": 5,
+      "conn": "con_qdrant"
+    },
+    "ai.parser": {
+      "schema": [],
+      "retry": true
+    },
+    "tool.mcp": {
+      "server": "mcp_vendors",
+      "tools": []
+    },
+    "tool.worker": {
+      "worker": "wrk_paddle",
+      "desc": "Re-run OCR on a page when the text looks incomplete."
+    },
+    "tool.calc": {},
+    "tool.search": {
+      "max": 5
+    },
+    "tool.http": {
+      "url": "https://api.example.com/fx",
+      "conn": "con_erp"
+    }
+  },
+  "node_settings_default": {
+    "retries": 2,
+    "timeout_s": 60,
+    "on_error": "stop",
+    "notes": ""
+  },
+  "slots": {
+    "model": {
+      "label": "Model",
+      "max": 1,
+      "description": "The language model that does the reasoning"
+    },
+    "memory": {
+      "label": "Memory",
+      "max": 1,
+      "description": "Context kept between calls"
+    },
+    "tools": {
+      "label": "Tools",
+      "max": 12,
+      "description": "Functions the model may call"
+    },
+    "knowledge": {
+      "label": "Knowledge",
+      "max": 3,
+      "description": "Reference collections retrieved at run time"
+    },
+    "parser": {
+      "label": "Output",
+      "max": 1,
+      "description": "Structured output schema"
+    }
+  },
+  "stages": {
+    "intake": "Intake",
+    "prepare": "Prepare",
+    "read": "Read",
+    "understand": "Understand",
+    "validate": "Validate",
+    "decide": "Decide",
+    "deliver": "Deliver",
+    "ai": "AI components"
+  },
+  "dynamic_outputs": {
+    "route.type": "list(config.paths) + [\"other\"]",
+    "route.confidence": [
+      "pass",
+      "review"
+    ],
+    "default": [
+      "out"
+    ],
+    "on_error_error_output": "append \"error\" when settings.on_error == \"error_output\""
+  },
+  "primary_secret_field": {
+    "api_key": "key",
+    "bearer": "token",
+    "basic": "password",
+    "oauth2_client_credentials": "client_secret",
+    "oauth2_authorization_code": "client_secret",
+    "hmac": "secret",
+    "mtls": "client_key_pem",
+    "aws_sigv4": "secret_access_key",
+    "azure_ad_client": "client_secret",
+    "none": null
+  }
+}

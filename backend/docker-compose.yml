@@ -1,0 +1,60 @@
+# Local databases for doc-intel-api. Pick one engine (or run both to check portability):
+#   docker compose up -d postgres          → DI_DATABASE_URL=postgresql+psycopg://di:di@localhost:5432/docintel
+#   docker compose up -d mssql mssql-init  → DI_DATABASE_URL='mssql+pyodbc://sa:DocIntel_Dev_2026!@localhost:1433/docintel?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes'
+# then: cd backend && alembic upgrade head   (see docs/database.md)
+name: doc-intel-db
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: di
+      POSTGRES_PASSWORD: di
+      POSTGRES_DB: docintel
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations/docker/postgres-init.sql:/docker-entrypoint-initdb.d/10-test-dbs.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U di -d docintel"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: "DocIntel_Dev_2026!"   # dev only — must meet SQL Server complexity rules
+    ports: ["1433:1433"]
+    volumes:
+      - mssqldata:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # One-shot: create the application + test databases once SQL Server is healthy.
+  mssql-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      mssql:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: "DocIntel_Dev_2026!"
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        for db in docintel docintel_test_db docintel_test_be1 docintel_test_be2 docintel_test_qa; do
+          /opt/mssql-tools18/bin/sqlcmd -C -S mssql -U sa -P "$$MSSQL_SA_PASSWORD" \
+            -Q "IF DB_ID('$$db') IS NULL CREATE DATABASE [$$db]; ALTER DATABASE [$$db] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;"
+        done
+    restart: "no"
+
+volumes:
+  pgdata:
+  mssqldata:

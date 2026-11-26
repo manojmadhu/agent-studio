@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest==9.2.0
+schemathesis==4.34.2
+datamodel-code-generator==0.102.0

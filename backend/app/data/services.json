@@ -1,0 +1,476 @@
+[
+  {
+    "id": "gmail",
+    "name": "Gmail",
+    "category": "mail",
+    "auth_types": [
+      "oauth2_authorization_code"
+    ],
+    "settings_fields": [
+      {
+        "key": "account",
+        "label": "Mailbox address",
+        "type": "text",
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": "microsoft_365_mail",
+    "name": "Microsoft 365 mail",
+    "category": "mail",
+    "auth_types": [
+      "oauth2_authorization_code",
+      "azure_ad_client"
+    ],
+    "settings_fields": [
+      {
+        "key": "account",
+        "label": "Mailbox address",
+        "type": "text",
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": "whatsapp_business",
+    "name": "WhatsApp Business",
+    "category": "messaging",
+    "auth_types": [
+      "bearer"
+    ],
+    "settings_fields": [
+      {
+        "key": "phone_number",
+        "label": "Business number",
+        "type": "text",
+        "required": true
+      },
+      {
+        "key": "phone_number_id",
+        "label": "Phone number ID",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      },
+      {
+        "key": "business_account_id",
+        "label": "Business account ID",
+        "type": "text",
+        "monospace": true
+      }
+    ]
+  },
+  {
+    "id": "slack",
+    "name": "Slack",
+    "category": "messaging",
+    "auth_types": [
+      "bearer",
+      "oauth2_authorization_code"
+    ],
+    "settings_fields": [
+      {
+        "key": "workspace",
+        "label": "Workspace",
+        "type": "text"
+      }
+    ]
+  },
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "category": "model_provider",
+    "auth_types": [
+      "api_key"
+    ],
+    "settings_fields": [
+      {
+        "key": "account",
+        "label": "Account or workspace",
+        "type": "text"
+      }
+    ]
+  },
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "category": "model_provider",
+    "auth_types": [
+      "api_key",
+      "bearer"
+    ],
+    "settings_fields": [
+      {
+        "key": "organization",
+        "label": "Organization ID",
+        "type": "text",
+        "monospace": true
+      },
+      {
+        "key": "project",
+        "label": "Project",
+        "type": "text"
+      }
+    ]
+  },
+  {
+    "id": "azure_openai",
+    "name": "Azure OpenAI",
+    "category": "model_provider",
+    "auth_types": [
+      "api_key",
+      "azure_ad_client"
+    ],
+    "settings_fields": [
+      {
+        "key": "endpoint",
+        "label": "Endpoint",
+        "type": "text",
+        "monospace": true,
+        "required": true,
+        "hint": "https://<resource>.openai.azure.com"
+      },
+      {
+        "key": "api_version",
+        "label": "API version",
+        "type": "text",
+        "monospace": true,
+        "default": "2025-04-01"
+      }
+    ]
+  },
+  {
+    "id": "google_gemini",
+    "name": "Google Gemini",
+    "category": "model_provider",
+    "auth_types": [
+      "api_key"
+    ],
+    "settings_fields": [
+      {
+        "key": "project",
+        "label": "Project",
+        "type": "text"
+      }
+    ]
+  },
+  {
+    "id": "ollama",
+    "name": "Ollama",
+    "category": "model_provider",
+    "auth_types": [
+      "none",
+      "bearer"
+    ],
+    "settings_fields": [
+      {
+        "key": "base_url",
+        "label": "Base URL",
+        "type": "text",
+        "monospace": true,
+        "required": true,
+        "default": "http://localhost:11434"
+      }
+    ]
+  },
+  {
+    "id": "openai_compatible",
+    "name": "OpenAI-compatible endpoint",
+    "category": "model_provider",
+    "auth_types": [
+      "bearer",
+      "api_key",
+      "none"
+    ],
+    "settings_fields": [
+      {
+        "key": "base_url",
+        "label": "Base URL",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": "postgresql",
+    "name": "PostgreSQL",
+    "category": "database",
+    "auth_types": [
+      "basic",
+      "mtls"
+    ],
+    "settings_fields": [
+      {
+        "key": "host",
+        "label": "Host",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      },
+      {
+        "key": "port",
+        "label": "Port",
+        "type": "number",
+        "default": 5432
+      },
+      {
+        "key": "database",
+        "label": "Database",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      },
+      {
+        "key": "sslmode",
+        "label": "SSL mode",
+        "type": "select",
+        "options": [
+          "require",
+          "verify-full",
+          "disable"
+        ],
+        "default": "require"
+      }
+    ]
+  },
+  {
+    "id": "mssql",
+    "name": "Microsoft SQL Server",
+    "category": "database",
+    "auth_types": [
+      "basic",
+      "azure_ad_client"
+    ],
+    "settings_fields": [
+      {
+        "key": "host",
+        "label": "Host",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      },
+      {
+        "key": "database",
+        "label": "Database",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": "amazon_s3",
+    "name": "Amazon S3",
+    "category": "storage",
+    "auth_types": [
+      "aws_sigv4"
+    ],
+    "settings_fields": [
+      {
+        "key": "bucket",
+        "label": "Bucket",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      },
+      {
+        "key": "region",
+        "label": "Region",
+        "type": "text",
+        "monospace": true,
+        "default": "me-central-1"
+      }
+    ]
+  },
+  {
+    "id": "azure_blob",
+    "name": "Azure Blob Storage",
+    "category": "storage",
+    "auth_types": [
+      "azure_ad_client",
+      "api_key"
+    ],
+    "settings_fields": [
+      {
+        "key": "account",
+        "label": "Storage account",
+        "type": "text",
+        "required": true
+      },
+      {
+        "key": "container",
+        "label": "Container",
+        "type": "text",
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": "sftp",
+    "name": "SFTP",
+    "category": "storage",
+    "auth_types": [
+      "basic",
+      "mtls"
+    ],
+    "settings_fields": [
+      {
+        "key": "host",
+        "label": "Host",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      },
+      {
+        "key": "port",
+        "label": "Port",
+        "type": "number",
+        "default": 22
+      }
+    ]
+  },
+  {
+    "id": "qdrant",
+    "name": "Qdrant",
+    "category": "vector_store",
+    "auth_types": [
+      "api_key",
+      "none"
+    ],
+    "settings_fields": [
+      {
+        "key": "url",
+        "label": "URL",
+        "type": "text",
+        "monospace": true,
+        "required": true,
+        "default": "http://localhost:6333"
+      }
+    ]
+  },
+  {
+    "id": "pgvector",
+    "name": "pgvector",
+    "category": "vector_store",
+    "auth_types": [
+      "basic"
+    ],
+    "settings_fields": [
+      {
+        "key": "host",
+        "label": "Host",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      },
+      {
+        "key": "database",
+        "label": "Database",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": "azure_ai_search",
+    "name": "Azure AI Search",
+    "category": "vector_store",
+    "auth_types": [
+      "api_key",
+      "azure_ad_client"
+    ],
+    "settings_fields": [
+      {
+        "key": "endpoint",
+        "label": "Endpoint",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": "redis",
+    "name": "Redis",
+    "category": "database",
+    "auth_types": [
+      "basic",
+      "none"
+    ],
+    "settings_fields": [
+      {
+        "key": "url",
+        "label": "URL",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": "http_api",
+    "name": "HTTP API",
+    "category": "api",
+    "auth_types": [
+      "api_key",
+      "bearer",
+      "basic",
+      "oauth2_client_credentials",
+      "hmac",
+      "mtls",
+      "aws_sigv4",
+      "azure_ad_client",
+      "none"
+    ],
+    "settings_fields": [
+      {
+        "key": "base_url",
+        "label": "Base URL",
+        "type": "text",
+        "monospace": true,
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": "mcp",
+    "name": "MCP server",
+    "category": "mcp",
+    "auth_types": [
+      "bearer",
+      "api_key",
+      "oauth2_client_credentials",
+      "none"
+    ],
+    "settings_fields": [
+      {
+        "key": "url",
+        "label": "URL",
+        "type": "text",
+        "monospace": true
+      }
+    ]
+  },
+  {
+    "id": "document_worker",
+    "name": "Document worker",
+    "category": "worker",
+    "auth_types": [
+      "api_key",
+      "bearer",
+      "mtls",
+      "none"
+    ],
+    "settings_fields": [
+      {
+        "key": "base_url",
+        "label": "Base URL",
+        "type": "text",
+        "monospace": true
+      }
+    ]
+  }
+]

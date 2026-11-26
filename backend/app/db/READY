@@ -1,0 +1,1 @@
+DB layer ready: app.db.{types,base,session,models} importable (31 tables, PG+MSSQL portable); use get_db / session_factory(); seed+conftest+migrations in progress.

@@ -1,0 +1,17 @@
+fastapi==0.165.0
+uvicorn[standard]==0.54.0
+starlette==1.10.0
+pydantic[email]==2.14.4
+pydantic-settings>=2.6
+SQLAlchemy==2.1.9
+alembic==1.20.1
+psycopg[binary]==3.3.9
+pyodbc==5.5.0
+cryptography==50.0.2
+PyJWT==2.15.1
+python-multipart==0.0.34
+httpx>=0.28
+PyYAML==6.0.4
+# BE2: page images (PDF rendering + PNG conversion/redaction boxes); optional at runtime
+pypdfium2==5.15.2
+pillow==13.0.0
