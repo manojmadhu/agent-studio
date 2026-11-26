@@ -74,7 +74,7 @@ for roles and for a second workspace. Every response a scenario sees is recorded
 | CT-01 | Schemathesis 4.34.2, `api/openapi.yaml`, uvicorn :8084, `X-API-Key: dik_test_admin`, `--max-examples 10 --seed 4242`, phases examples+coverage+fuzzing, checks `not_a_server_error, status_code_conformance, content_type_conformance, response_schema_conformance`. **No operation excluded** (destructive calls hit the QA DB only). Stateful phase not run (budget) | no 5xx; every status documented; problem+json on errors; responses match schemas | **Fail**: 95/95 ops tested, 4 695 cases. 17 ops → 500 (D-01…D-04); 2 ops → 502 by design (simulated upstream failure, C-03); 143 undocumented statuses (C-01…C-03); 1 SSE finding = contract formulation (C-04). **0** response-schema and **0** content-type violations |
 | CT-02 | `test_golden_responses.py::test_golden_http_responses_status_and_shape`: replay all 74 recorded requests of `mock_golden_responses.json` in recorded order (GETs, validate, step test, invoke/health/test, MCP call, 409/412/422/428 cases, draft PUTs, publish, test-run) | same status and content type; no key of the mock missing in live (all array items); no type change; live response valid against the contract | Pass. Contract findings only C-01 (MCP call 422) and C-02 (428) |
 | CT-03 | `test_golden_sse_transcripts` × 4 (`pl_ap`×2 docs, `pl_exp`, `pl_kyc`) | same create shape, identical (event, node_id, status) sequence, result shape | Pass |
-| CT-04 | `test_robustness.py` (20 cases) | 4xx problem, never 500 | xfail (strict): defects D-01…D-06 reproduced |
+| CT-04 | `test_robustness.py` (20 cases) | 4xx problem, never 500 | Pass after the fixes (originally xfail: defects D-01…D-06 reproduced) |
 
 ### 3.3 MSSQL checks (§ 5) and portal smoke
 
@@ -159,9 +159,9 @@ instance (`docker compose up -d mssql mssql-init`, then `DI_TEST_DATABASE_URL=ms
   `READ_COMMITTED_SNAPSHOT ON`, otherwise blocking/deadlocks), and the idempotency-key insert race;
 - case-insensitive collation (rule 7) on ids, emails and names in uniqueness checks;
 - VARCHAR id parameters bound as NVARCHAR (implicit conversion → index scans) if `setinputsizes` is not effective;
-- error translation: D-01/D-02 produce different driver errors on SQL Server (2628 / 8115) but the same 500;
+- error translation: D-01/D-02 produce different driver errors on SQL Server (2628 / 8115); both surface as `DataError` and now map to 422, still to be confirmed on a real instance;
 - D-03 diverges: SQL Server accepts NUL characters that PostgreSQL rejects;
-- the DBA copy stops at 0001 (D-07).
+- ~~the DBA copy stops at 0001 (D-07)~~ fixed: `mssql_0002_kc_connection_nullable.sql`.
 
 ## 6. Coverage of the 95 operations
 
@@ -194,7 +194,7 @@ maps every request to a contract operation):
 
 ## 8. Recommendation
 
-**GO for committing** the backend and the QA suites. All 304 tests pass against PostgreSQL, the golden replay and the
+**GO for committing** the backend and the QA suites. All 304 tests passed at QA time (324 after the defect fixes) against PostgreSQL, the golden replay and the
 portal live smoke match the mock, secrets never leak, roles and workspace isolation hold, and there are no High defects.
 
 Conditions, before a production deployment (not before the commit):
