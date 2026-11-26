@@ -1,0 +1,1053 @@
+[
+  {
+    "type": "intake.email",
+    "stage": "intake",
+    "name": "Email inbox",
+    "description": "Collect attachments from a mailbox",
+    "icon": "email",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "conn",
+        "label": "Mailbox",
+        "type": "connection",
+        "default": "con_gmail",
+        "required": true,
+        "service": "gmail"
+      },
+      {
+        "key": "filter",
+        "label": "Search filter",
+        "type": "text",
+        "default": "in:inbox has:attachment",
+        "hint": "Gmail search syntax.",
+        "monospace": true
+      },
+      {
+        "key": "poll",
+        "label": "Check every",
+        "type": "select",
+        "default": "5 minutes",
+        "options": [
+          "1 minute",
+          "5 minutes",
+          "15 minutes",
+          "1 hour"
+        ]
+      },
+      {
+        "key": "markRead",
+        "label": "Mark messages as read after collection",
+        "type": "switch",
+        "default": true
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "intake.upload",
+    "stage": "intake",
+    "name": "Upload portal",
+    "description": "Users or systems upload files",
+    "icon": "upload",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "types",
+        "label": "Accepted file types",
+        "type": "text",
+        "default": "pdf, png, jpg, tiff",
+        "required": true
+      },
+      {
+        "key": "maxMb",
+        "label": "Maximum file size (MB)",
+        "type": "number",
+        "default": 25
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "intake.whatsapp",
+    "stage": "intake",
+    "name": "WhatsApp inbound",
+    "description": "Photos and PDFs sent to a business number",
+    "icon": "chat",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "conn",
+        "label": "Business number",
+        "type": "connection",
+        "default": "con_wa",
+        "required": true,
+        "service": "whatsapp_business"
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "intake.api",
+    "stage": "intake",
+    "name": "API endpoint",
+    "description": "Another system posts documents",
+    "icon": "webhook",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "path",
+        "label": "Path",
+        "type": "text",
+        "default": "/v1/documents",
+        "required": true,
+        "monospace": true
+      },
+      {
+        "key": "auth",
+        "label": "Authentication",
+        "type": "select",
+        "default": "HMAC signature",
+        "options": [
+          "HMAC signature",
+          "API key",
+          "OAuth client credentials"
+        ]
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "intake.storage",
+    "stage": "intake",
+    "name": "Storage watch",
+    "description": "Poll an SFTP folder or S3 bucket",
+    "icon": "folder--move-to",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "conn",
+        "label": "Storage connection",
+        "type": "connection",
+        "default": "",
+        "required": true,
+        "service": "amazon_s3"
+      },
+      {
+        "key": "path",
+        "label": "Folder",
+        "type": "text",
+        "default": "/inbound/scans",
+        "monospace": true
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "prep.enhance",
+    "stage": "prepare",
+    "name": "Image enhancement",
+    "description": "Deskew, denoise and rotate scans",
+    "icon": "image",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "ops",
+        "label": "Operations",
+        "type": "chips",
+        "default": [
+          "Deskew",
+          "Auto-rotate",
+          "Denoise"
+        ],
+        "options": [
+          "Deskew",
+          "Auto-rotate",
+          "Denoise",
+          "Binarize",
+          "Crop borders"
+        ]
+      },
+      {
+        "key": "dpi",
+        "label": "Target resolution (DPI)",
+        "type": "number",
+        "default": 300
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "prep.split",
+    "stage": "prepare",
+    "name": "Split pages",
+    "description": "Split multi-document files",
+    "icon": "layers",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "mode",
+        "label": "Split by",
+        "type": "select",
+        "default": "Detected document boundaries",
+        "options": [
+          "Detected document boundaries",
+          "Every page",
+          "Blank separator pages"
+        ]
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "read.ocr",
+    "stage": "read",
+    "name": "Text recognition",
+    "description": "OCR with reading order",
+    "icon": "scan",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "worker",
+        "label": "Worker",
+        "type": "worker",
+        "default": "wrk_paddle",
+        "required": true
+      },
+      {
+        "key": "lang",
+        "label": "Languages",
+        "type": "select",
+        "default": "English + Arabic",
+        "options": [
+          "English",
+          "Arabic",
+          "English + Arabic",
+          "Auto-detect"
+        ]
+      },
+      {
+        "key": "mode",
+        "label": "Output",
+        "type": "select",
+        "default": "Text and layout",
+        "options": [
+          "Text only",
+          "Text and layout",
+          "Text, layout and tables"
+        ]
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "read.layout",
+    "stage": "read",
+    "name": "Layout and tables",
+    "description": "Tables, key-value pairs, signatures",
+    "icon": "table--split",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "detect",
+        "label": "Detect",
+        "type": "chips",
+        "default": [
+          "Tables",
+          "Key-value pairs"
+        ],
+        "options": [
+          "Tables",
+          "Key-value pairs",
+          "Signatures",
+          "Stamps",
+          "Checkboxes"
+        ]
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "read.sheet",
+    "stage": "read",
+    "name": "Spreadsheet reader",
+    "description": "Excel Parser Service · POST /to-text",
+    "icon": "data-table",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "worker",
+        "label": "Worker",
+        "type": "worker",
+        "default": "wrk_excel",
+        "required": true
+      },
+      {
+        "key": "max",
+        "label": "Maximum characters",
+        "type": "number",
+        "default": 14000
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "ai.classify",
+    "stage": "understand",
+    "name": "Classify document",
+    "description": "Assign a document type",
+    "icon": "tag--group",
+    "ai": true,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "classes",
+        "label": "Document types",
+        "type": "text",
+        "default": "invoice, receipt, credit_note",
+        "required": true,
+        "hint": "Comma separated. Anything else is classified as “other”."
+      }
+    ],
+    "slots": [
+      "model"
+    ],
+    "required_slots": [
+      "model"
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "ai.extract",
+    "stage": "understand",
+    "name": "Extract fields",
+    "description": "Structured data against a schema",
+    "icon": "code",
+    "ai": true,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "skill",
+        "label": "Skill",
+        "type": "skill",
+        "default": "skl_invoice"
+      },
+      {
+        "key": "instructions",
+        "label": "Instructions",
+        "type": "textarea",
+        "default": "Extract the fields exactly as printed. Amounts as numbers in the document currency. Dates as YYYY-MM-DD."
+      }
+    ],
+    "slots": [
+      "model",
+      "tools",
+      "knowledge",
+      "parser"
+    ],
+    "required_slots": [
+      "model",
+      "parser"
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "ai.agent",
+    "stage": "understand",
+    "name": "AI agent",
+    "description": "Reasoning with tools, memory and knowledge",
+    "icon": "ai-generate",
+    "ai": true,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "skill",
+        "label": "Skill",
+        "type": "skill",
+        "default": "none"
+      },
+      {
+        "key": "instructions",
+        "label": "Instructions",
+        "type": "textarea",
+        "default": "",
+        "required": true
+      },
+      {
+        "key": "maxSteps",
+        "label": "Maximum tool calls",
+        "type": "number",
+        "default": 8
+      }
+    ],
+    "slots": [
+      "model",
+      "memory",
+      "tools",
+      "knowledge",
+      "parser"
+    ],
+    "required_slots": [
+      "model"
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "val.rules",
+    "stage": "validate",
+    "name": "Business rules",
+    "description": "Arithmetic, dates, duplicates",
+    "icon": "list--checked",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "rules",
+        "label": "Rules",
+        "type": "chips",
+        "default": [
+          "Total = subtotal + VAT",
+          "Due date after invoice date",
+          "No duplicate invoice number"
+        ],
+        "options": [
+          "Total = subtotal + VAT",
+          "Due date after invoice date",
+          "No duplicate invoice number",
+          "Currency is AED",
+          "TRN has 15 digits"
+        ]
+      },
+      {
+        "key": "onFail",
+        "label": "When a rule fails",
+        "type": "select",
+        "default": "Send to review",
+        "options": [
+          "Send to review",
+          "Stop the run",
+          "Continue and flag"
+        ]
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "val.pii",
+    "stage": "validate",
+    "name": "Redact personal data",
+    "description": "Mask PII before it leaves the platform",
+    "icon": "view--off",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "entities",
+        "label": "Entities",
+        "type": "chips",
+        "default": [
+          "Email",
+          "Phone",
+          "IBAN",
+          "Card number"
+        ],
+        "options": [
+          "Email",
+          "Phone",
+          "IBAN",
+          "Card number",
+          "Emirates ID",
+          "Passport number",
+          "Address"
+        ]
+      },
+      {
+        "key": "mode",
+        "label": "Method",
+        "type": "select",
+        "default": "Mask",
+        "options": [
+          "Mask",
+          "Hash",
+          "Remove field"
+        ]
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "val.lookup",
+    "stage": "validate",
+    "name": "Master data match",
+    "description": "Match against a master via MCP",
+    "icon": "data--reference",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "server",
+        "label": "MCP server",
+        "type": "mcp_server",
+        "default": "mcp_vendors",
+        "required": true
+      },
+      {
+        "key": "tool",
+        "label": "Tool",
+        "type": "text",
+        "default": "match_vendor",
+        "monospace": true
+      },
+      {
+        "key": "key",
+        "label": "Match on",
+        "type": "select",
+        "default": "Vendor TRN",
+        "options": [
+          "Vendor TRN",
+          "Vendor name",
+          "PO number",
+          "Customer name"
+        ]
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "val.injection",
+    "stage": "validate",
+    "name": "Prompt-injection screen",
+    "description": "Strip hidden instructions in documents",
+    "icon": "rule--locked",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "level",
+        "label": "Sensitivity",
+        "type": "select",
+        "default": "Medium",
+        "options": [
+          "Low",
+          "Medium",
+          "High"
+        ]
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "route.type",
+    "stage": "decide",
+    "name": "Route by type",
+    "description": "One output per document type",
+    "icon": "branch",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "paths",
+        "label": "Outputs",
+        "type": "text",
+        "default": "invoice, receipt",
+        "required": true,
+        "hint": "Comma separated. An “other” output is always added."
+      }
+    ]
+  },
+  {
+    "type": "route.confidence",
+    "stage": "decide",
+    "name": "Confidence gate",
+    "description": "Low-confidence results go to review",
+    "icon": "meter",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "threshold",
+        "label": "Minimum field confidence",
+        "type": "number",
+        "default": 0.85,
+        "hint": "Between 0 and 1. Applied to the lowest-scoring required field.",
+        "min": 0,
+        "max": 1
+      }
+    ],
+    "outputs": [
+      "pass",
+      "review"
+    ]
+  },
+  {
+    "type": "review.human",
+    "stage": "decide",
+    "name": "Human review",
+    "description": "Queue for an operator",
+    "icon": "user--follow",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "queue",
+        "label": "Queue",
+        "type": "select",
+        "default": "Accounts payable",
+        "options": [
+          "Accounts payable",
+          "Compliance",
+          "Expenses"
+        ]
+      },
+      {
+        "key": "sla",
+        "label": "SLA (hours)",
+        "type": "number",
+        "default": 4
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "out.erp",
+    "stage": "deliver",
+    "name": "Post to ERP",
+    "description": "Create a supplier invoice in the ERP",
+    "icon": "send",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "conn",
+        "label": "ERP connection",
+        "type": "connection",
+        "default": "con_erp",
+        "required": true,
+        "service": "http_api"
+      },
+      {
+        "key": "object",
+        "label": "Object",
+        "type": "select",
+        "default": "AP invoice (draft)",
+        "options": [
+          "AP invoice (draft)",
+          "AP invoice (posted)",
+          "Expense report"
+        ]
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "out.db",
+    "stage": "deliver",
+    "name": "Save to database",
+    "description": "Upsert results",
+    "icon": "data--base",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "conn",
+        "label": "Database",
+        "type": "connection",
+        "default": "con_pg",
+        "required": true,
+        "service": "postgresql"
+      },
+      {
+        "key": "table",
+        "label": "Table",
+        "type": "text",
+        "default": "extracted_documents",
+        "required": true,
+        "monospace": true
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "out.email",
+    "stage": "deliver",
+    "name": "Send email",
+    "description": "Reply or notify via Gmail",
+    "icon": "email",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "conn",
+        "label": "Send from",
+        "type": "connection",
+        "default": "con_gmail",
+        "required": true,
+        "service": "gmail"
+      },
+      {
+        "key": "to",
+        "label": "To",
+        "type": "text",
+        "default": "{{intake.sender}}",
+        "monospace": true
+      },
+      {
+        "key": "subject",
+        "label": "Subject",
+        "type": "text",
+        "default": "We could not process {{document.name}}"
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "out.whatsapp",
+    "stage": "deliver",
+    "name": "Send WhatsApp",
+    "description": "Template message",
+    "icon": "chat",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "conn",
+        "label": "From number",
+        "type": "connection",
+        "default": "con_wa",
+        "required": true,
+        "service": "whatsapp_business"
+      },
+      {
+        "key": "template",
+        "label": "Template",
+        "type": "text",
+        "default": "document_processed",
+        "monospace": true
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "out.export",
+    "stage": "deliver",
+    "name": "Export file",
+    "description": "JSON or CSV per document",
+    "icon": "document--export",
+    "ai": false,
+    "has_input": true,
+    "fields": [
+      {
+        "key": "format",
+        "label": "Format",
+        "type": "select",
+        "default": "JSON",
+        "options": [
+          "JSON",
+          "CSV"
+        ]
+      },
+      {
+        "key": "path",
+        "label": "Path",
+        "type": "text",
+        "default": "exports/{{run.id}}.json",
+        "monospace": true
+      }
+    ],
+    "outputs": [
+      "out"
+    ]
+  },
+  {
+    "type": "ai.model",
+    "stage": "ai",
+    "name": "Language model",
+    "description": "Anthropic, OpenAI, Azure, Gemini, Ollama",
+    "icon": "machine-learning-model",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "provider",
+        "label": "Provider",
+        "type": "provider",
+        "default": "prv_anthropic"
+      },
+      {
+        "key": "model",
+        "label": "Model",
+        "type": "model",
+        "default": "claude-sonnet-5-5"
+      },
+      {
+        "key": "conn",
+        "label": "Connection",
+        "type": "provider_connection",
+        "default": ""
+      },
+      {
+        "key": "temperature",
+        "label": "Temperature",
+        "type": "range",
+        "default": 0.1,
+        "min": 0,
+        "max": 1
+      },
+      {
+        "key": "maxTokens",
+        "label": "Maximum output tokens",
+        "type": "number",
+        "default": 2048
+      }
+    ],
+    "plugs_into": "model"
+  },
+  {
+    "type": "ai.memory",
+    "stage": "ai",
+    "name": "Memory",
+    "description": "Conversation or per-document memory",
+    "icon": "layers",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "scope",
+        "label": "Scope",
+        "type": "select",
+        "default": "Per document",
+        "options": [
+          "Per document",
+          "Per sender",
+          "Per pipeline run"
+        ]
+      },
+      {
+        "key": "window",
+        "label": "Messages kept",
+        "type": "number",
+        "default": 10
+      }
+    ],
+    "plugs_into": "memory"
+  },
+  {
+    "type": "ai.knowledge",
+    "stage": "ai",
+    "name": "Knowledge collection",
+    "description": "Vector search over reference documents",
+    "icon": "catalog",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "collection",
+        "label": "Collection",
+        "type": "select",
+        "default": "vendor_policies",
+        "options": [
+          "vendor_policies",
+          "tax_rules_uae",
+          "chart_of_accounts"
+        ]
+      },
+      {
+        "key": "topK",
+        "label": "Results per query",
+        "type": "number",
+        "default": 5
+      },
+      {
+        "key": "conn",
+        "label": "Vector store",
+        "type": "connection",
+        "default": "con_qdrant",
+        "service": "qdrant"
+      }
+    ],
+    "plugs_into": "knowledge"
+  },
+  {
+    "type": "ai.parser",
+    "stage": "ai",
+    "name": "Output schema",
+    "description": "Fields, types, required and PII flags",
+    "icon": "document--tasks",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "schema",
+        "label": "Fields",
+        "type": "schema",
+        "default": []
+      },
+      {
+        "key": "retry",
+        "label": "Retry once on invalid output",
+        "type": "switch",
+        "default": true
+      }
+    ],
+    "plugs_into": "parser"
+  },
+  {
+    "type": "tool.mcp",
+    "stage": "ai",
+    "name": "MCP tools",
+    "description": "Tools from a registered MCP server",
+    "icon": "plug",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "server",
+        "label": "Server",
+        "type": "mcp_server",
+        "default": "mcp_vendors"
+      },
+      {
+        "key": "tools",
+        "label": "Tools exposed",
+        "type": "mcp_tools",
+        "default": []
+      }
+    ],
+    "plugs_into": "tools"
+  },
+  {
+    "type": "tool.worker",
+    "stage": "ai",
+    "name": "Worker tool",
+    "description": "Let the model call a document worker",
+    "icon": "chip",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "worker",
+        "label": "Worker",
+        "type": "worker",
+        "default": "wrk_paddle"
+      },
+      {
+        "key": "desc",
+        "label": "When to use it",
+        "type": "textarea",
+        "default": "Re-run OCR on a page when the text looks incomplete.",
+        "hint": "The model reads this to decide when to call the tool."
+      }
+    ],
+    "plugs_into": "tools"
+  },
+  {
+    "type": "tool.calc",
+    "stage": "ai",
+    "name": "Calculator",
+    "description": "Exact arithmetic for totals and tax",
+    "icon": "calculator",
+    "ai": false,
+    "has_input": false,
+    "fields": [],
+    "plugs_into": "tools"
+  },
+  {
+    "type": "tool.search",
+    "stage": "ai",
+    "name": "Web search",
+    "description": "Look up public information",
+    "icon": "earth",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "max",
+        "label": "Maximum results",
+        "type": "number",
+        "default": 5
+      }
+    ],
+    "plugs_into": "tools"
+  },
+  {
+    "type": "tool.http",
+    "stage": "ai",
+    "name": "HTTP tool",
+    "description": "Call an internal REST API",
+    "icon": "webhook",
+    "ai": false,
+    "has_input": false,
+    "fields": [
+      {
+        "key": "url",
+        "label": "URL",
+        "type": "text",
+        "default": "https://api.example.com/fx",
+        "required": true,
+        "monospace": true
+      },
+      {
+        "key": "conn",
+        "label": "Authentication",
+        "type": "connection",
+        "default": "con_erp",
+        "service": "http_api"
+      }
+    ],
+    "plugs_into": "tools"
+  }
+]

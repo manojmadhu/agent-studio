@@ -1,6 +1,6 @@
-# 04 · Backend API specification (build later)
+# 04 · Backend API specification
 
-**Status:** specification only — the backend is a separate project and is not built yet.
+**Status:** implemented in `backend/` of this repository (FastAPI, PostgreSQL or MSSQL) — see `backend/README.md`. All 95 operations are built; the portal runs against it in live mode with no frontend changes.
 **Machine-readable contract:** `api/openapi.yaml` (OpenAPI 3.1, validated with `openapi-spec-validator` — 66 paths, 95 operations, 97 schemas, zero unresolved `$ref`s, no duplicate `operationId`s).
 **Consumers:** the Doc Intelligence Studio portal (React, `portal/`) and external systems (ingest, webhooks).
 
@@ -8,13 +8,13 @@
 
 ## 1. Project boundary
 
-| | Frontend `doc-intel-portal` | Backend `doc-intel-api` (to build) |
+| | Frontend `doc-intel-portal` | Backend `doc-intel-api` (built) |
 |---|---|---|
-| Repo | separate | separate |
+| Repo | `agent-studio/portal` | `agent-studio/backend` (same repository) |
 | Runtime | Vite + React SPA, static hosting | Python 3.12 · FastAPI · Uvicorn |
-| State | none durable (server is source of truth) | PostgreSQL 16 (metadata, graphs, runs, audit) |
-| Queue / workers | — | Redis 7 + Celery/Arq (run orchestration), S3-compatible object store for documents |
-| Secrets | never sees secret values | Vault / Azure Key Vault / AWS Secrets Manager via `SecretStore` interface |
+| State | none durable (server is source of truth) | PostgreSQL 16 **or** Microsoft SQL Server 2019+ (metadata, graphs, runs, audit) |
+| Queue / workers | — | MVP: in-process thread pool behind a `RunQueue` interface + local object store (Redis/Celery and S3 are the planned production backends) |
+| Secrets | never sees secret values | `SecretStore` interface: local Fernet-encrypted store today; Vault / Azure Key Vault / AWS Secrets Manager backends planned |
 | Contract | types generated from `openapi.yaml` (`openapi-typescript`) | routes implemented to `openapi.yaml`; contract tests with Schemathesis |
 
 The portal runs against an in-app **mock adapter** (`VITE_API_MODE=mock`) until the backend exists, and switches to `VITE_API_MODE=live` + `VITE_API_BASE_URL` with no code changes.
@@ -141,14 +141,14 @@ New workers either return this directly (`generic_pages_v1`) or get an adapter c
 
 ```json
 { "nodes": [ { "id": "n3", "type": "ai.extract", "name": "Extract fields", "x": 620, "y": 140,
-               "config": { "schema": [ { "name": "total_amount", "type": "number", "required": true } ] },
+               "config": { "schema": [ { "name": "total_amount", "type": "number", "req": true } ] },
                "settings": { "retries": 2, "timeout_s": 60, "on_error": "stop" } },
              { "id": "c1", "type": "ai.model", "name": "Model", "x": 600, "y": 330,
-               "config": { "provider_id": "prv_anthropic", "model": "claude-sonnet-5-5", "temperature": 0.1 } } ],
+               "config": { "provider": "prv_anthropic", "model": "claude-sonnet-5-5", "temperature": 0.1 } } ],
   "edges": [ { "id": "e2", "from": "n2", "from_port": "out", "to": "n3" },
              { "id": "s1", "from": "c1", "from_port": "plug", "to": "n3", "slot": "model" } ] }
 ```
-Server-side validation (`ValidationIssue.code`): `missing_intake`, `no_incoming_connection`, `required_field`, `missing_model`, `missing_parser`, `invalid_schema_field`, `provider_disabled`, `loop`, `unknown_step_type`. Publishing and activation are blocked by any `error`.
+Server-side validation (`ValidationIssue.code`): `missing_intake`, `no_incoming_connection`, `required_field`, `missing_model`, `missing_parser`, `invalid_schema_field`, `provider_disabled`, `loop`, `unknown_type`. The full rule set is a 1:1 port of the portal's `validate.ts` (see `backend/docs/portal-integration-notes.md` §9). Publishing and activation are blocked by any `error`.
 
 ## 8. Run lifecycle
 

@@ -10,3 +10,9 @@ portal/e2e/shots/
 __pycache__/
 .DS_Store
 Thumbs.db
+backend/.venv/
+backend/var/
+.pytest_cache/
+*.pyc
+backend/.schemathesis/
+backend/.hypothesis/
